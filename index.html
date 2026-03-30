@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>発注管理</title>
+<!-- PWA対応：Webアプリマニフェスト -->
+<link rel="manifest" href="manifest.json">
+<!-- iOSのホーム画面追加対応 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="発注管理">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<!-- テーマカラー -->
+<meta name="theme-color" content="#2c5f2e">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -438,6 +447,38 @@
     font-size: 13px;
     padding: 40px 0;
   }
+
+  /* 並び順共有ボタン */
+  .share-btn {
+    background: none;
+    border: 1.5px solid var(--border);
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 12px;
+    color: var(--text-sub);
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: all 0.2s;
+  }
+  .share-btn:active { opacity: 0.7; }
+  .share-btn.copied {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-light);
+  }
+
+  /* 共有URL適用中バナー */
+  .shared-banner {
+    background: var(--accent-light);
+    border-bottom: 1px solid var(--accent);
+    color: var(--accent);
+    font-size: 12px;
+    text-align: center;
+    padding: 6px 16px;
+    display: none;
+  }
+  .shared-banner.visible { display: block; }
 </style>
 </head>
 <body>
@@ -447,11 +488,14 @@
     <h1>📦 発注管理</h1>
     <div class="header-right">
       <span class="reset-timer" id="reset-timer" style="display:none"></span>
+      <button class="share-btn" id="share-btn" onclick="copyShareURL()">🔗 並び順を共有</button>
       <span class="header-badge" id="check-count">0件</span>
     </div>
   </div>
   <div class="tabs" id="tabs"></div>
 </div>
+<!-- 共有URLから並び順を読み込んだ際に表示するバナー -->
+<div class="shared-banner" id="shared-banner">📋 共有された並び順を適用中</div>
 
 <div class="col-header">
   <span></span>
@@ -868,6 +912,8 @@ function drop(e, id) {
   if (dragSrcIndex === null || dragSrcIndex === targetIndex) return;
   const moved = products.splice(dragSrcIndex, 1)[0];
   products.splice(targetIndex, 0, moved);
+  // 並び替えのたびにlocalStorageへ自動保存
+  saveOrderToStorage();
   renderList();
 }
 function dragEnd(e) {
@@ -916,9 +962,126 @@ function completeOrder() {
   alert('✅ 発注完了！');
 }
 
+// ========== 並び順の共有（URLハッシュ方式） ==========
+
+/**
+ * 現在の並び順をURLハッシュ文字列にエンコードする
+ * 例: #z=3,0,1,2&s=10002,10000,10001
+ */
+function encodeOrderToHash() {
+  const zIds = allProducts["雑貨"].map(p => p.id).join(',');
+  const sIds = allProducts["消耗品"].map(p => p.id).join(',');
+  return `#z=${zIds}&s=${sIds}`;
+}
+
+/**
+ * URLハッシュから並び順を読み取り、allProductsを並べ替える
+ * @returns {boolean} 並び順の適用に成功したかどうか
+ */
+function applyOrderFromHash(hash) {
+  if (!hash || !hash.startsWith('#')) return false;
+  try {
+    const params = new URLSearchParams(hash.slice(1));
+    const zParam = params.get('z');
+    const sParam = params.get('s');
+    if (!zParam || !sParam) return false;
+
+    const reorder = (products, idStr) => {
+      const ids = idStr.split(',').map(Number);
+      // 読み込んだIDの数が現在の商品数と一致しない場合はスキップ
+      if (ids.length !== products.length) return false;
+      const map = new Map(products.map(p => [p.id, p]));
+      // 存在しないIDが含まれている場合はスキップ
+      if (ids.some(id => !map.has(id))) return false;
+      const reordered = ids.map(id => map.get(id));
+      reordered.forEach((p, i) => { products[i] = p; });
+      return true;
+    };
+
+    const ok1 = reorder(allProducts["雑貨"], zParam);
+    const ok2 = reorder(allProducts["消耗品"], sParam);
+    return ok1 && ok2;
+  } catch (e) {
+    console.warn('並び順の読み込みに失敗しました:', e);
+    return false;
+  }
+}
+
+/**
+ * localStorage に並び順を保存する
+ */
+function saveOrderToStorage() {
+  try {
+    const zIds = allProducts["雑貨"].map(p => p.id).join(',');
+    const sIds = allProducts["消耗品"].map(p => p.id).join(',');
+    localStorage.setItem('order-mgmt-order-z', zIds);
+    localStorage.setItem('order-mgmt-order-s', sIds);
+  } catch (e) { /* プライベートブラウズ等では無視 */ }
+}
+
+/**
+ * localStorage から並び順を復元する
+ * @returns {boolean} 復元に成功したかどうか
+ */
+function loadOrderFromStorage() {
+  try {
+    const zParam = localStorage.getItem('order-mgmt-order-z');
+    const sParam = localStorage.getItem('order-mgmt-order-s');
+    if (!zParam || !sParam) return false;
+    return applyOrderFromHash(`#z=${zParam}&s=${sParam}`);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * 現在の並び順をURLにエンコードしてクリップボードにコピーする
+ */
+function copyShareURL() {
+  const hash = encodeOrderToHash();
+  const url = location.href.split('#')[0] + hash;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('share-btn');
+    btn.textContent = '✅ コピーしました';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = '🔗 並び順を共有';
+      btn.classList.remove('copied');
+    }, 2000);
+  }).catch(() => {
+    // clipboard APIが使えない場合はpromptで表示
+    prompt('以下のURLをコピーしてください', url);
+  });
+}
+
 // ========== 初期化 ==========
+
+// 1. URLハッシュに並び順が含まれる場合は最優先で適用（共有URLを開いたとき）
+const sharedFromURL = applyOrderFromHash(location.hash);
+if (sharedFromURL) {
+  document.getElementById('shared-banner').classList.add('visible');
+  // 共有URLの並び順をlocalStorageにも保存し、次回以降も維持
+  saveOrderToStorage();
+} else {
+  // URLハッシュがない場合は前回保存した並び順を復元
+  loadOrderFromStorage();
+}
+
 renderTabs();
 renderList();
+
+// ========== Service Worker 登録（PWA対応） ==========
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then((registration) => {
+        console.log('Service Worker 登録成功:', registration.scope);
+      })
+      .catch((error) => {
+        console.log('Service Worker 登録失敗:', error);
+      });
+  });
+}
 </script>
 </body>
 </html>
