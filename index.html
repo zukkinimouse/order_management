@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>発注管理</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f3ef;
+    --surface: #ffffff;
+    --border: #e0dbd2;
+    --text: #1a1814;
+    --text-sub: #8a8070;
+    --accent: #2c5f2e;
+    --accent-light: #e8f0e8;
+    --danger: #c0392b;
+    --hidden-bg: #f0ede8;
+    --hidden-text: #bbb5aa;
+    --check-active: #2c5f2e;
+    --handle: #c8c0b4;
+    --tab-active: #2c5f2e;
+    --tab-text: #6a6258;
+    --shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+
+  body {
+    font-family: 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding-bottom: 80px;
+  }
+
+  /* ヘッダー */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 16px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+  }
+  .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .header h1 {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .header-badge {
+    background: var(--accent);
+    color: white;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .reset-timer {
+    font-size: 11px;
+    color: var(--text-sub);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 3px 10px;
+    white-space: nowrap;
+  }
+  .reset-timer.soon {
+    color: #c0392b;
+    border-color: #c0392b;
+    background: #fdf0ef;
+  }
+
+  /* タブ */
+  .tabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 5px 16px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--tab-text);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  /* 列ヘッダー */
+  .col-header {
+    display: grid;
+    grid-template-columns: 32px 1fr 52px 52px 40px;
+    gap: 4px;
+    padding: 8px 12px 6px;
+    font-size: 10px;
+    color: var(--text-sub);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .col-header span { text-align: center; }
+  .col-header .col-name { text-align: left; padding-left: 2px; }
+
+  /* リスト */
+  .list {
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* 行 */
+  .item {
+    display: grid;
+    grid-template-columns: 32px 1fr 52px 52px 40px;
+    gap: 4px;
+    align-items: center;
+    background: var(--surface);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    padding: 8px 8px;
+    transition: all 0.2s;
+    cursor: default;
+    box-shadow: var(--shadow);
+  }
+  .item.hidden-item {
+    background: var(--hidden-bg);
+    border-color: transparent;
+    box-shadow: none;
+    opacity: 0.6;
+  }
+  .item.checked {
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+  .item.dragging {
+    opacity: 0.4;
+    transform: scale(0.98);
+  }
+  .item.drag-over {
+    border-color: var(--accent);
+    border-style: dashed;
+  }
+
+  /* 操作列（ハンドル＋目） */
+  .ops {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .handle {
+    color: var(--handle);
+    font-size: 14px;
+    cursor: grab;
+    line-height: 1;
+    user-select: none;
+    padding: 2px 4px;
+    border-radius: 4px;
+    touch-action: none;
+  }
+  .handle:active { cursor: grabbing; }
+  .toggle-vis {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    line-height: 1;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+  }
+  .toggle-vis:hover { opacity: 1; }
+  .toggle-vis.vis-on { opacity: 1; }
+
+  /* 商品名 */
+  .item-name {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    cursor: pointer;
+    color: var(--text);
+    word-break: break-all;
+  }
+  .item-name.hidden-text { color: var(--hidden-text); }
+  .item-name .short-name {
+    display: block;
+  }
+  .item-name .hint {
+    font-size: 10px;
+    color: var(--text-sub);
+    font-weight: 400;
+    margin-top: 1px;
+  }
+
+  /* 数値入力 */
+  .num-input {
+    width: 100%;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 4px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    background: var(--bg);
+    color: var(--text);
+    -moz-appearance: textfield;
+    font-family: inherit;
+  }
+  .num-input::-webkit-outer-spin-button,
+  .num-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+  .num-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: white;
+  }
+  .item.hidden-item .num-input {
+    background: transparent;
+    border-color: transparent;
+    color: var(--hidden-text);
+    pointer-events: none;
+  }
+
+  /* チェックボックス */
+  .check-cell {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .check-box {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .check-box.checked {
+    background: var(--check-active);
+    border-color: var(--check-active);
+    color: white;
+  }
+  .item.hidden-item .check-box {
+    pointer-events: none;
+    opacity: 0.3;
+  }
+
+  /* モーダル */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 200;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .modal-overlay.open {
+    opacity: 1;
+    pointer-events: all;
+  }
+  .modal {
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    padding: 20px 20px 36px;
+    width: 100%;
+    max-width: 480px;
+    transform: translateY(100%);
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .modal-overlay.open .modal {
+    transform: translateY(0);
+  }
+  .modal-bar {
+    width: 40px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 0 auto 16px;
+  }
+  .modal h2 {
+    font-size: 13px;
+    color: var(--text-sub);
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  .modal .full-name {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.4;
+    margin-bottom: 20px;
+    color: var(--text);
+  }
+  .modal-field {
+    margin-bottom: 14px;
+  }
+  .modal-field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-sub);
+    letter-spacing: 0.08em;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+  }
+  .modal-field input {
+    width: 100%;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 15px;
+    font-family: inherit;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .modal-field input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: white;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+  }
+  .btn {
+    flex: 1;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity 0.15s;
+  }
+  .btn:active { opacity: 0.75; }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-secondary { background: var(--bg); color: var(--text); border: 1.5px solid var(--border); }
+
+  /* 発注確認バー */
+  .order-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--accent);
+    color: white;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 150;
+    transform: translateY(100%);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 -4px 20px rgba(44,95,46,0.3);
+  }
+  .order-bar.visible { transform: translateY(0); }
+  .order-bar-text { font-size: 15px; font-weight: 700; }
+  .order-bar-sub { font-size: 11px; opacity: 0.8; margin-top: 1px; }
+  .order-bar-btn {
+    background: white;
+    color: var(--accent);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  /* 発注確認モーダル */
+  .order-modal-list {
+    max-height: 50vh;
+    overflow-y: auto;
+    margin: 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .order-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--bg);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .order-item-row span:last-child {
+    font-weight: 700;
+    color: var(--accent);
+    white-space: nowrap;
+    margin-left: 8px;
+  }
+
+  .empty-state {
+    text-align: center;
+    color: var(--text-sub);
+    font-size: 13px;
+    padding: 40px 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <h1>📦 発注管理</h1>
+    <div class="header-right">
+      <span class="reset-timer" id="reset-timer" style="display:none"></span>
+      <span class="header-badge" id="check-count">0件</span>
+    </div>
+  </div>
+  <div class="tabs" id="tabs"></div>
+</div>
+
+<div class="col-header">
+  <span></span>
+  <span class="col-name">商品名</span>
+  <span>最低在庫</span>
+  <span>発注数</span>
+  <span>確認</span>
+</div>
+
+<div class="list" id="list"></div>
+
+<div class="order-bar" id="order-bar">
+  <div>
+    <div class="order-bar-text" id="bar-text">0件を発注</div>
+    <div class="order-bar-sub">タップして確認</div>
+  </div>
+  <button class="order-bar-btn" onclick="openOrderModal()">確認する</button>
+</div>
+
+<!-- 商品詳細モーダル -->
+<div class="modal-overlay" id="modal" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-bar"></div>
+    <h2>商品詳細</h2>
+    <div class="full-name" id="modal-fullname"></div>
+    <div class="modal-field">
+      <label>省略名（リスト表示用）</label>
+      <input type="text" id="modal-shortname" placeholder="例：ホットRカップ">
+    </div>
+    <div class="modal-field">
+      <label>最低在庫数</label>
+      <input type="number" id="modal-min" min="0">
+    </div>
+    <div class="modal-field">
+      <label>発注数（デフォルト）</label>
+      <input type="number" id="modal-order" min="1">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModalDirect()">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveModal()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 発注確認モーダル -->
+<div class="modal-overlay" id="order-modal" onclick="closeOrderModal(event)">
+  <div class="modal">
+    <div class="modal-bar"></div>
+    <h2>発注リスト</h2>
+    <div class="order-modal-list" id="order-modal-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeOrderModalDirect()">閉じる</button>
+      <button class="btn btn-primary" onclick="completeOrder()">発注完了 ✓</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== 商品データ ==========
+const TABS = ["雑貨", "消耗品"];
+
+const RAW_ZAKKA = `デザートスプーン １，０００個
+スムージー用ＰＨＢＨストロー８Ｍ３００本入
+スムージー用フタ １００個入
+◆７カフェ ホットＲカップ ５０入
+◆７カフェ ホットＬカップ ５０入
+◆７カフェホットカフェラテ用Ｒカップ５０入
+◆７カフェホットカフェラテ用Ｌカップ５０入
+７ＣＳＰホットＲカップ紺水素焙煎５０入
+７カフェ ホットＲフタ ５０入
+７カフェ ＳＰホットＲフタ ５０個入
+７カフェアイスＲ・Ｌフタ飲み口付 １００入
+７カフェ スティックシュガー １００本入
+７カフェ シロップ ３０入
+７カフェ ゼロカロリーシロップ ５０入
+７カフェ用コーヒー フレッシュ５０入
+７カフェ ＰＨＢＨ ストロー ３００本入
+７カフェ 木製マドラー１０００本入
+◎７カフェ用ペーパーフィルター １巻
+７カフェ ホットＬフタ ５０入
+◎ＦＦまとめ買い 角底袋 １００枚入り
+◎フライヤーからあげ容器 黒 ５０枚入り
+◎常温専用まとめ買い紙袋 １００枚入り
+◎フライヤー縦長 紙容器 ５０枚入り
+◎フライヤーからあげ容器 もも ５０枚入り
+◎フライヤーフタ有 六角紙容器５０枚入り
+◎フライヤースタンド紙容器（緑）５０枚入り
+◎フライヤーからあげ容器 むね ５０枚入り
+◎加温・常温兼用 ミシン目紙袋１００枚入
+◎ＦＦ持ち帰り袋 ５００枚入り
+常温専用 ７ＣＢ未晒バーガー袋 １００枚入
+常温専用 ７ＣＢ未晒ドーナツ袋 １００枚入
+モリモリ丸形容器 大ＳＭＰ－９００ ３０個
+モリモリ丸形容器 小ＳＭＰ－７００ ３０個
+ＳＰ－１デザイン入りピザボックス白５０枚入
+フライヤーＡＶ チェック２００枚入り
+ＦＦ持ち帰り ボックス ２０枚入り
+スパイス香る中濃ソースＳ１０ｇ１００個入り
+バーベキューソース ６０個入り
+トマト＆あらびきマスタード１２０個入り
+キッチンペーパー ２００枚入り
+フライヤー油こし 不織布５０枚入り
+ＦＦパン・中華まん 兼用紙袋１００枚入り
+プレミアオイル８ｋｇ
+フードパック（小）１００枚入りＯＰ－０４５
+トマトケチャップ６ｇ ５０個入
+フライヤー用透明袋入楊枝 １０００本入り
+ＦＦフードパック１００枚入り ＯＰ－０３０
+アイスクリーム用 スプーン（大）３００本
+アイスクリーム用 スプーン（小）４５０本
+竹完封割箸 １００膳
+紙おしぼり １００本入
+スプーン １００本
+フォーク １００本
+７カフェ カフェラテ用日本橋榮太樓の黒みつ`.trim().split('\n');
+
+const RAW_SHOMOHIN = `７ＮＯＷ配達用保冷剤１００個入
+７ＮＯＷ専用袋２５号 １００枚入
+７ＮＯＷ専用袋６号Ｌ １００枚入
+紙製雑誌袋 ２００枚入
+７ＮＯＷシール ２００枚
+７ＮＯＷ専用袋１２号 １００枚入
+７ＮＯＷ専用袋４５号 １００枚入
+持ち帰り用ホルダー ２５枚入
+ポリ袋ＵＦパック １２号（大） ２０００枚
+ポリ袋 汁漏れ防止用マチ付きＭ ５００枚入
+ＰＯＳＡカード用 ギフト封筒 ３０枚
+切手・印紙用袋 ２００枚入り
+はがき用袋 ２００枚入
+はがき用袋（大） ２００枚入
+ポリ製ゴミ袋 ７０Ｌ透明 １００枚
+ポリ製ゴミ袋 １００Ｌ透明 ５０枚
+ペットボトル回収用袋 １２０Ｌ １０枚入
+サニタリー用ゴミ袋 黒 １００枚入り
+ニチバン布粘着テープ ５０ｍｍ×２５ｍ
+雑誌付録止め用はがせるテープ ５０ｍ
+クラフトテープ５００ ５０ｍｍ×５０ｍ
+新聞返品用パンチレスファイル Ｂ４サイズ青
+領収書用店名スタンプインク
+７－１１名入テープ ＯＰＰ（１０巻入り）
+フックシール １００枚入
+荷造りひもポリエチレン５０ｍｍ×５００Ｍ
+セロテープ４０５ １５ｍｍ×３５Ｍ １０巻
+ボールペンスーパーグリップＧ 黒 １０本組
+用箋バサミ Ａ４－Ｅ
+雑誌返本用 ダンボール １０枚
+コミック用帯封パック ２００枚
+テプラ用ＰＲＯテープカートリッジＳＳ１２Ｋ
+ツインテープカッター台替刃２セット入り
+非常ボタン用ストラップネック部
+文書保存箱 ２枚組
+ストアスタンプ用インク
+液晶用ウェットティッシュクリーナー
+次世代用 エプソンプリンタ用インクブラック
+次世代用 エプソンプリンタ用インクシアン
+次世代用 エプソンプリンタ用インクイエロー
+次世代用 エプソンプリンタ用インクマゼンタ
+カードＢＯＸ
+レジ用記録紙（高保存） ５０入
+チケットケース １００枚
+プリンター用紙 ５００枚
+新チケットプリンタ用紙 ２入り
+Ｍコピー機コピー用紙Ａ４サイズ ２５００枚
+Ｍコピー機コピー用紙Ａ３サイズ １５００枚
+Ｍコピー機コピー用紙Ｂ４サイズ ２５００枚
+Ｍコピー機コピー用紙Ｂ５サイズ ２５００枚
+新マルチコピー機写真プリントセット８００枚
+小数点対応ハンドラベラー専用インク ５個入
+税込価格表示用 名入りラベル １０巻入り
+マルチコピー機はがきプリント用紙 ７００枚
+２Ｌ対応 写真・はがき持ち帰り袋 １００枚
+ＦＦウォーマー用 深バット １個
+ＦＦウォーマー用 浅バット １個
+フライヤー什器専用 すくい網
+７ＮＯＷデリバリーバッグ
+５００ｍＬパック飲料用 ストロー５００本入
+フライヤー専用 オイルびっくりクロス
+７カフェノズル（白） 清掃用ブラシ
+７カフェノズル（黒） 清掃用ブラシ
+カフェラテマシン専用 アルカリ洗浄剤
+カフェラテマシン専用 酸洗浄剤
+カフェラテマシン部品 ミルクソケット
+グリストラップ用 吸油シート ６０枚
+試飲用 紙コップ３オンス（５０入）
+袋入りロングストロー ２５０本入
+グリスガード用 フィルター ３０個入
+フライヤー用高耐久 ネットスポンジ 青
+フライヤー用高耐久 ネットスポンジ 黄
+ドレッシング用陳列什器フェイスアップ機能付
+ゴンドラ最上段用バックガード 大 ２枚入
+ゴンドラ最上段用バックガード 小 ２枚入
+Ｈ５０ 仕切板用延長パーツ １０枚入
+Ｈ８０ 仕切板用延長パーツ １０枚入
+店内・店頭ゴミ箱分別シール ビン・カン
+店内・店頭ゴミ箱分別シール ペットボトル
+店内・店頭ゴミ箱分別シール 燃やせるごみ
+ウォークイン背面こぼれ止め樹脂クリップ２個
+ウォークイン背面用 こぼれ止め １セット
+使い捨てニトリル手袋ブルー Ｍ １００枚
+ＦＡＳＴＧＲＩＰ床用滑り止めコーティング剤
+ブリーチ除菌・漂白剤 １．５リットル
+除菌洗浄剤（中性） ５Ｌ
+カウンタークロス グリーン ３０枚入り
+詰替用ハンドアセプジー（新処方）
+アルコールスプレーアルペットＮＶ詰替え５Ｌ
+アルコールスプレー アルペット詰替容器
+トイレロール ２５０ｍ×３２Ｒ
+手洗い用ペーパー タオル（平判）
+使い捨てＴＰＥ手袋 半透明 ２００枚
+マイクロファイバークロス ネイビー ３枚入
+マイクロファイバークロス グリーン ３枚入
+トイレマジックリン 業務用 ４．５Ｌ
+トイレ掃除用使い捨てロング手袋 ５０枚
+トイレ用そうじシート ２０枚入
+スーパーフォームＥＸ
+食器洗浄機用洗浄剤 ＫＷ９０ｓ ５ｋｇ
+食器洗浄機用ＰＥ手袋 Ｍ ２００枚
+手洗い石鹸液 シャボネット ５ＫＧ
+除菌洗浄剤（中性） 用 空ボトル
+エコだ値 ＦＦ／Ｗ４００セット
+販促用天井フック １７本
+ラミネートフィルムＢ５販促用 １００枚
+ラミネートフィルムＡ３販促用 １００枚
+ラミネートフィルムＡ４販促用 １００枚
+アイスパネル取付 クリップ
+お買得商品 アイスパネル
+お買得商品 アイスカゴ用ＰＯＰ
+新発売ＰＯＰセット （２０枚入り）
+お買い得商品 単品ＰＯＰ ２０枚
+フック用新発売ＰＯＰセット（２０枚入り）
+横断幕ブラケット用ホールドクリップ
+カード式プライスホルダーケース用 １００個
+カード式プライスホルダーゴンドラ用１００個
+カード式プライスホルダー アイス用 ７０個
+イラスト入り手書きＰＯＰ 黄色 ２０枚`.trim().split('\n');
+
+// ========== ユーティリティ ==========
+function autoShorten(name) {
+  let s = name.replace(/[◆◎△▲]/g, '').trim();
+  s = s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  s = s.replace(/[Ａ-Ｚａ-ｚ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  s = s.replace(/\s*[\d０-９,，]+[個本枚入膳巻kgKG]+\s*$/g, '').trim();
+  s = s.replace(/\s+/g, ' ').trim();
+  if (s.length > 14) s = s.slice(0, 14) + '…';
+  return s;
+}
+
+function autoOrderQty(name) {
+  const m = name.match(/([0-9０-９,，]+)(個|本|枚|入|膳|巻)/);
+  if (!m) return 1;
+  return parseInt(m[1].replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[,，]/g, ''));
+}
+
+function makeProducts(rawList, tab, startId) {
+  return rawList.map((line, i) => {
+    const clean = line.replace(/[◆◎△▲]/g, '').trim();
+    return {
+      id: startId + i,
+      tab,
+      fullName: clean,
+      shortName: autoShorten(clean),
+      minStock: 1,
+      orderQty: 1,
+      checked: false,
+      visible: true,
+    };
+  });
+}
+
+const zakkaProducts    = makeProducts(RAW_ZAKKA,    "雑貨",   0);
+const shomohinProducts = makeProducts(RAW_SHOMOHIN, "消耗品", 10000);
+const allProducts = { "雑貨": zakkaProducts, "消耗品": shomohinProducts };
+
+// ========== 状態 ==========
+let currentTab = "雑貨";
+let dragSrcIndex = null;
+let modalTargetId = null;
+
+function getProducts() { return allProducts[currentTab]; }
+
+// ========== 自動リセット ==========
+const RESET_MS = 5 * 60 * 60 * 1000;
+let lastCheckedAt = null;
+
+function updateResetTimer() {
+  const timerEl = document.getElementById('reset-timer');
+  const anyChecked = Object.values(allProducts).flat().some(p => p.checked && p.visible);
+  if (!anyChecked || !lastCheckedAt) { timerEl.style.display = 'none'; return; }
+  const remaining = RESET_MS - (Date.now() - lastCheckedAt);
+  if (remaining <= 0) { doAutoReset(); return; }
+  timerEl.style.display = '';
+  const h = Math.floor(remaining / 3600000);
+  const m = Math.floor((remaining % 3600000) / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  timerEl.textContent = h > 0 ? `🔄 ${h}時間${m}分後にリセット` : m > 0 ? `🔄 ${m}分${s}秒後にリセット` : `🔄 ${s}秒後にリセット`;
+  timerEl.classList.toggle('soon', remaining < 3600000);
+}
+
+function doAutoReset() {
+  Object.values(allProducts).flat().forEach(p => { p.checked = false; });
+  lastCheckedAt = null;
+  renderList(); renderTabs();
+  document.getElementById('reset-timer').style.display = 'none';
+}
+
+setInterval(() => { if (lastCheckedAt) updateResetTimer(); }, 1000);
+
+// ========== タブ ==========
+function renderTabs() {
+  const el = document.getElementById('tabs');
+  el.innerHTML = TABS.map(tab => {
+    const count = allProducts[tab].filter(p => p.checked && p.visible).length;
+    const badge = count > 0 ? ` <span style="background:rgba(255,255,255,0.35);border-radius:10px;padding:0 6px;font-size:11px;">${count}</span>` : '';
+    return `<button class="tab ${tab === currentTab ? 'active' : ''}" onclick="switchTab('${tab}')">${tab}${badge}</button>`;
+  }).join('');
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  dragSrcIndex = null;
+  renderTabs();
+  renderList();
+}
+
+// ========== リスト描画 ==========
+function renderList() {
+  const list = document.getElementById('list');
+  const products = getProducts();
+  if (products.length === 0) { list.innerHTML = '<div class="empty-state">商品がありません</div>'; return; }
+
+  list.innerHTML = products.map(p => `
+    <div class="item ${p.visible ? '' : 'hidden-item'} ${p.checked && p.visible ? 'checked' : ''}"
+         id="item-${p.id}" draggable="true"
+         ondragstart="dragStart(event, ${p.id})"
+         ondragover="dragOver(event, ${p.id})"
+         ondrop="drop(event, ${p.id})"
+         ondragend="dragEnd(event)">
+      <div class="ops">
+        <span class="handle">⠿</span>
+        <button class="toggle-vis ${p.visible ? 'vis-on' : ''}" onclick="toggleVisible(${p.id})">
+          ${p.visible ? '👁' : '🙈'}
+        </button>
+      </div>
+      <div class="item-name ${p.visible ? '' : 'hidden-text'}" onclick="openModal(${p.id})">
+        <span class="short-name">${p.shortName}</span>
+        <span class="hint">タップで詳細</span>
+      </div>
+      <input type="number" class="num-input" value="${p.minStock}" min="0"
+             onchange="updateMin(${p.id}, this.value)" ${p.visible ? '' : 'disabled'}>
+      <input type="number" class="num-input" value="${p.orderQty}" min="1"
+             onchange="updateOrder(${p.id}, this.value)" ${p.visible ? '' : 'disabled'}>
+      <div class="check-cell">
+        <div class="check-box ${p.checked && p.visible ? 'checked' : ''}" onclick="toggleCheck(${p.id})">
+          ${p.checked && p.visible ? '✓' : ''}
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  updateBar();
+}
+
+// ========== 操作 ==========
+function toggleVisible(id) {
+  const p = findProduct(id);
+  if (!p) return;
+  p.visible = !p.visible;
+  if (!p.visible) p.checked = false;
+  renderList(); renderTabs();
+}
+
+function toggleCheck(id) {
+  const p = findProduct(id);
+  if (!p || !p.visible) return;
+  p.checked = !p.checked;
+  const anyChecked = Object.values(allProducts).flat().some(x => x.checked && x.visible);
+  lastCheckedAt = anyChecked ? Date.now() : null;
+  renderList(); renderTabs(); updateResetTimer();
+}
+
+function updateMin(id, val) { const p = findProduct(id); if (p) p.minStock = parseInt(val) || 0; }
+function updateOrder(id, val) { const p = findProduct(id); if (p) p.orderQty = parseInt(val) || 1; }
+
+function findProduct(id) {
+  return Object.values(allProducts).flat().find(p => p.id === id);
+}
+
+function updateBar() {
+  const all = Object.values(allProducts).flat();
+  const checked = all.filter(p => p.checked && p.visible);
+  const bar = document.getElementById('order-bar');
+  document.getElementById('check-count').textContent = checked.length + '件';
+  document.getElementById('bar-text').textContent = checked.length + '件を発注';
+  bar.classList.toggle('visible', checked.length > 0);
+}
+
+// ========== ドラッグ ==========
+function dragStart(e, id) {
+  const products = getProducts();
+  dragSrcIndex = products.findIndex(p => p.id === id);
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+function dragOver(e, id) {
+  e.preventDefault();
+  document.querySelectorAll('.item').forEach(el => el.classList.remove('drag-over'));
+  const el = document.getElementById('item-' + id);
+  if (el) el.classList.add('drag-over');
+}
+function drop(e, id) {
+  e.preventDefault();
+  const products = getProducts();
+  const targetIndex = products.findIndex(p => p.id === id);
+  if (dragSrcIndex === null || dragSrcIndex === targetIndex) return;
+  const moved = products.splice(dragSrcIndex, 1)[0];
+  products.splice(targetIndex, 0, moved);
+  renderList();
+}
+function dragEnd(e) {
+  document.querySelectorAll('.item').forEach(el => el.classList.remove('dragging', 'drag-over'));
+  dragSrcIndex = null;
+}
+
+// ========== モーダル ==========
+function openModal(id) {
+  modalTargetId = id;
+  const p = findProduct(id);
+  document.getElementById('modal-fullname').textContent = p.fullName;
+  document.getElementById('modal-shortname').value = p.shortName;
+  document.getElementById('modal-min').value = p.minStock;
+  document.getElementById('modal-order').value = p.orderQty;
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal(e) { if (e.target === document.getElementById('modal')) closeModalDirect(); }
+function closeModalDirect() { document.getElementById('modal').classList.remove('open'); modalTargetId = null; }
+function saveModal() {
+  if (modalTargetId === null) return;
+  const p = findProduct(modalTargetId);
+  p.shortName = document.getElementById('modal-shortname').value || autoShorten(p.fullName);
+  p.minStock = parseInt(document.getElementById('modal-min').value) || 0;
+  p.orderQty = parseInt(document.getElementById('modal-order').value) || 1;
+  closeModalDirect(); renderList();
+}
+
+// ========== 発注確認 ==========
+function openOrderModal() {
+  const checked = Object.values(allProducts).flat().filter(p => p.checked && p.visible);
+  document.getElementById('order-modal-list').innerHTML = checked.map(p => `
+    <div class="order-item-row">
+      <span>${p.shortName}</span>
+      <span>${p.orderQty}個</span>
+    </div>
+  `).join('');
+  document.getElementById('order-modal').classList.add('open');
+}
+function closeOrderModal(e) { if (e.target === document.getElementById('order-modal')) closeOrderModalDirect(); }
+function closeOrderModalDirect() { document.getElementById('order-modal').classList.remove('open'); }
+function completeOrder() {
+  Object.values(allProducts).flat().forEach(p => { p.checked = false; });
+  lastCheckedAt = null;
+  closeOrderModalDirect(); renderList(); renderTabs(); updateResetTimer();
+  alert('✅ 発注完了！');
+}
+
+// ========== 初期化 ==========
+renderTabs();
+renderList();
+</script>
+</body>
+</html>
