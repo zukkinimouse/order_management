@@ -1,0 +1,28 @@
+---
+description: index.html を変更してコミットするとき、sw.js のキャッシュバージョンも必ず上げる
+globs: index.html
+alwaysApply: true
+---
+
+# Service Worker キャッシュバージョンの更新ルール
+
+`index.html`（またはその他アセット）を変更してコミットするときは、**必ず同時に `sw.js` の `CACHE_NAME` のバージョン番号を上げること**。
+
+## やり方
+
+`sw.js` の1行目:
+
+```js
+// 変更前
+const CACHE_NAME = 'order-management-v2';
+
+// 変更後（番号を1つ上げる）
+const CACHE_NAME = 'order-management-v3';
+```
+
+番号は v2 → v3 → v4 ... と順番に上げていく。
+
+## 理由
+
+このプロジェクトはPWA（Service Worker あり）のため、バージョンを上げないと
+ユーザーのブラウザが古いキャッシュを使い続け、コードの変更が反映されない。
