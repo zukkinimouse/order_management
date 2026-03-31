@@ -13,6 +13,9 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <!-- テーマカラー -->
 <meta name="theme-color" content="#2c5f2e">
+<!-- Firebase SDK（チェック状態のリアルタイム同期） -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -922,6 +925,7 @@ function checkScheduledReset() {
 /** チェックをリセットして画面を更新する */
 function doReset(showAlert = true) {
   Object.values(allProducts).flat().forEach(p => { p.checked = false; });
+  if (checksRef) checksRef.remove(); // Firebase のチェックも一括クリア
   renderList(); renderTabs();
   if (showAlert) alert('✅ 発注完了！');
 }
@@ -1006,8 +1010,20 @@ function toggleVisible(id) {
 function toggleCheck(id) {
   const p = findProduct(id);
   if (!p || !p.visible) return;
-  p.checked = !p.checked;
-  renderList(); renderTabs();
+  const newVal = !p.checked;
+  if (checksRef) {
+    // Firebase 経由で同期（全員の画面にリアルタイム反映）
+    if (newVal) {
+      checksRef.child(String(id)).set(true);
+    } else {
+      checksRef.child(String(id)).remove();
+    }
+    // UI 更新は Firebase リスナーが担うのでここでは行わない
+  } else {
+    // Firebase 未設定時はローカルのみ更新
+    p.checked = newVal;
+    renderList(); renderTabs();
+  }
 }
 
 // ========== 数値選択ポップアップ ==========
@@ -1196,6 +1212,7 @@ function completeOrder() {
   });
   saveOrderHistory();
   localStorage.setItem('order-mgmt-last-reset', String(now));
+  if (checksRef) checksRef.remove(); // Firebase のチェックを一括クリア
   closeOrderModalDirect();
   renderList(); renderTabs();
   alert('✅ 発注完了！');
@@ -1292,6 +1309,50 @@ function copyShareURL() {
     prompt('以下のURLをコピーしてください', url);
   });
 }
+
+// ========== Firebase リアルタイム同期（チェック状態の共有） ==========
+// ★ 以下の firebaseConfig に、Firebaseコンソールで取得した値を貼り付けてください
+//   設定手順: https://console.firebase.google.com
+//   プロジェクト設定 → マイアプリ → CDN の設定オブジェクトをコピー
+
+const firebaseConfig = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  databaseURL:       "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId:             "YOUR_APP_ID"
+};
+
+// checksRef: Firebase Realtime Database の参照（未設定時は null）
+let checksRef = null;
+
+(function initFirebase() {
+  if (firebaseConfig.apiKey === 'YOUR_API_KEY') {
+    console.info('Firebase未設定のため、チェック同期は無効です。');
+    return;
+  }
+  try {
+    firebase.initializeApp(firebaseConfig);
+    checksRef = firebase.database().ref('checks');
+
+    // 全クライアントにリアルタイムでチェック状態を配信
+    checksRef.on('value', (snapshot) => {
+      const data = snapshot.val() || {};
+      // いったん全チェックをリセット
+      Object.values(allProducts).flat().forEach(p => { p.checked = false; });
+      // Firebase の状態を反映
+      Object.keys(data).forEach(id => {
+        const p = findProduct(parseInt(id));
+        if (p && p.visible) p.checked = true;
+      });
+      renderList(); renderTabs();
+    });
+  } catch (e) {
+    console.warn('Firebase初期化失敗:', e);
+  }
+})();
 
 // ========== 初期化 ==========
 
