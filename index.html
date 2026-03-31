@@ -523,6 +523,33 @@
   .item.hist-yellow { border-left: 4px solid #f59e0b; }
   .item.hist-red    { border-left: 4px solid #ef4444; }
 
+  /* モーダル内の色手動設定セレクター */
+  .color-selector {
+    display: flex;
+    gap: 6px;
+  }
+  .color-opt {
+    flex: 1;
+    padding: 8px 4px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    font-family: inherit;
+    color: var(--text-sub);
+    transition: all 0.15s;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .color-opt.c-blue.selected   { background: #3b82f6; border-color: #3b82f6; color: white; }
+  .color-opt.c-yellow.selected { background: #f59e0b; border-color: #f59e0b; color: white; }
+  .color-opt.c-red.selected    { background: #ef4444; border-color: #ef4444; color: white; }
+  .color-opt.c-auto.selected,
+  .color-opt.c-none.selected   { background: var(--text); border-color: var(--text); color: white; }
+
   /* 絞り込みフィルターバー */
   .filter-bar {
     display: flex;
@@ -604,6 +631,10 @@
     <div class="modal-field">
       <label>発注数（デフォルト）</label>
       <input type="number" id="modal-order" min="1">
+    </div>
+    <div class="modal-field">
+      <label>色の設定（手動上書き）</label>
+      <div class="color-selector" id="modal-color"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModalDirect()">キャンセル</button>
@@ -864,15 +895,22 @@ function saveOrderHistory() {
 }
 
 /**
- * 発注履歴に基づいて色分けクラスを返す
- *   なし: 発注履歴がない（デフォルト色を維持）
+ * 発注履歴（または手動上書き）に基づいて色分けクラスを返す
+ *   手動上書きが設定されている場合はそちらを優先する
+ *   なし: 履歴なし（デフォルト色を維持）
  *   青:   1週間以内に発注
  *   黄:   1週間〜1ヶ月前に発注
  *   赤:   1ヶ月以上発注なし
  */
 function getHistoryClass(id) {
+  // 手動上書きが優先
+  const ov = colorOverride[id];
+  if (ov === 'none') return '';
+  if (ov)            return `hist-${ov}`;
+
+  // 発注履歴による自動判定
   const ts = orderHistory[id];
-  if (!ts) return '';  // 履歴なし → デフォルト色を維持
+  if (!ts) return '';
   const age   = Date.now() - ts;
   const WEEK  = 7  * 24 * 3600 * 1000;
   const MONTH = 30 * 24 * 3600 * 1000;
@@ -1220,17 +1258,55 @@ function openModal(id) {
   document.getElementById('modal-shortname').value = p.shortName;
   document.getElementById('modal-min').value = p.minStock;
   document.getElementById('modal-order').value = p.orderQty;
+  // 現在の上書き色をセット（未設定なら null = 自動）
+  modalColorSelection = colorOverride[id] !== undefined ? colorOverride[id] : null;
+  renderModalColorSelector();
   document.getElementById('modal').classList.add('open');
 }
+
+function renderModalColorSelector() {
+  const opts = [
+    { val: null,     label: '⚙ 自動', cls: 'c-auto' },
+    { val: 'blue',   label: '● 青',   cls: 'c-blue' },
+    { val: 'yellow', label: '● 黄',   cls: 'c-yellow' },
+    { val: 'red',    label: '● 赤',   cls: 'c-red' },
+    { val: 'none',   label: '○ なし', cls: 'c-none' },
+  ];
+  document.getElementById('modal-color').innerHTML = opts.map(o => `
+    <button class="color-opt ${o.cls} ${modalColorSelection === o.val ? 'selected' : ''}"
+            onclick="selectModalColor(${o.val === null ? 'null' : `'${o.val}'`})">
+      ${o.label}
+    </button>
+  `).join('');
+}
+
+function selectModalColor(val) {
+  modalColorSelection = val;
+  renderModalColorSelector();
+}
+
 function closeModal(e) { if (e.target === document.getElementById('modal')) closeModalDirect(); }
 function closeModalDirect() { document.getElementById('modal').classList.remove('open'); modalTargetId = null; }
+
 function saveModal() {
   if (modalTargetId === null) return;
   const p = findProduct(modalTargetId);
   p.shortName = document.getElementById('modal-shortname').value || autoShorten(p.fullName);
   p.minStock = parseInt(document.getElementById('modal-min').value) || 0;
   p.orderQty = parseInt(document.getElementById('modal-order').value) || 1;
-  closeModalDirect(); renderList();
+
+  // 色の手動上書きを保存（null = 自動に戻す）
+  if (modalColorSelection === null) {
+    delete colorOverride[modalTargetId];
+    if (colorOverrideRef) colorOverrideRef.child(String(modalTargetId)).remove();
+  } else {
+    colorOverride[modalTargetId] = modalColorSelection;
+    if (colorOverrideRef) colorOverrideRef.child(String(modalTargetId)).set(modalColorSelection);
+  }
+
+  closeModalDirect();
+  renderFilterBar();
+  renderList();
 }
 
 // ========== 発注確認 ==========
@@ -1284,9 +1360,14 @@ const firebaseConfig = {
 };
 
 // Firebase Realtime Database の参照（未設定時は null）
-let checksRef  = null; // チェック状態
-let historyRef = null; // 発注履歴（色分け）
-let orderRef   = null; // 並び順
+let checksRef       = null; // チェック状態
+let historyRef      = null; // 発注履歴（色分け）
+let orderRef        = null; // 並び順
+let colorOverrideRef = null; // 色の手動上書き
+
+// 色の手動上書き設定 { productId: 'blue'|'yellow'|'red'|'none'|null }
+let colorOverride = {};
+let modalColorSelection = null; // モーダルで選択中の色
 
 /** Firebase に並び順を保存する */
 function saveOrderToFirebase() {
@@ -1315,9 +1396,10 @@ function applyOrderFromIdString(products, idStr) {
   try {
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
-    checksRef  = db.ref('checks');
-    historyRef = db.ref('orderHistory');
-    orderRef   = db.ref('order');
+    checksRef        = db.ref('checks');
+    historyRef       = db.ref('orderHistory');
+    orderRef         = db.ref('order');
+    colorOverrideRef = db.ref('colorOverride');
 
     // ① チェック状態：全員にリアルタイム反映
     checksRef.on('value', (snapshot) => {
@@ -1336,6 +1418,13 @@ function applyOrderFromIdString(products, idStr) {
       Object.keys(data).forEach(id => {
         orderHistory[parseInt(id)] = data[id];
       });
+      renderFilterBar();
+      renderList();
+    });
+
+    // ④ 色の手動上書き：全員にリアルタイム反映
+    colorOverrideRef.on('value', (snapshot) => {
+      colorOverride = snapshot.val() || {};
       renderFilterBar();
       renderList();
     });
