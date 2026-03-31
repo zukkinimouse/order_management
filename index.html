@@ -1382,10 +1382,10 @@ function deleteTab(name) {
     });
     delete allProducts[name];
   }
-  // FirebaseのOrderデータから削除
-  if (orderRef) orderRef.child(encodeURIComponent(name)).remove();
   saveCustomTabs();
   saveProductTabs();
+  // order は saveOrderToFirebase でタブ名キーと一致させて丸ごと上書き（remove のキー不一致を避ける）
+  saveOrderToFirebase();
   if (currentTab === name) currentTab = getTabs()[0];
   renderTabs(); renderFilterBar(); renderList();
 }
@@ -1556,7 +1556,11 @@ function toggleVisible(id) {
   const p = findProduct(id);
   if (!p) return;
   p.visible = !p.visible;
-  if (!p.visible) p.checked = false;
+  if (!p.visible) {
+    p.checked = false;
+    // 非表示にしたら全端末でチェックも外す（checks にゴミが残らない）
+    if (checksRef) checksRef.child(String(id)).remove();
+  }
   // 表示/非表示の変更を永続化する
   saveProductSettingsLocal();
   saveProductSettingToFirebase(id);
@@ -1879,6 +1883,8 @@ function completeOrder() {
     historyRef.update(historyUpdates);
   }
   if (checksRef) checksRef.remove();
+  // オフライン時も履歴を端末に残す（Firebase 反映は次回接続時）
+  saveOrderHistory();
   localStorage.setItem('order-mgmt-last-reset', String(now));
   closeOrderModalDirect();
   renderList(); renderTabs();
@@ -1967,12 +1973,14 @@ function applyOrderFromIdString(products, idStr) {
       renderList(); renderTabs();
     });
 
-    // ② 発注履歴：色分けをリアルタイム反映
+    // ② 発注履歴：色分けをリアルタイム反映（他端末の変更を localStorage にもミラーする）
     historyRef.on('value', (snapshot) => {
       const data = snapshot.val() || {};
+      orderHistory = {};
       Object.keys(data).forEach(id => {
         orderHistory[parseInt(id)] = data[id];
       });
+      saveOrderHistory();
       renderFilterBar();
       renderList();
     });
