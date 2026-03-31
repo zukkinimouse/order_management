@@ -523,37 +523,6 @@
   .item.hist-yellow { border-left: 4px solid #f59e0b; }
   .item.hist-red    { border-left: 4px solid #ef4444; }
 
-  /* 並び順共有ボタン */
-  .share-btn {
-    background: none;
-    border: 1.5px solid var(--border);
-    border-radius: 20px;
-    padding: 3px 10px;
-    font-size: 12px;
-    color: var(--text-sub);
-    cursor: pointer;
-    font-family: inherit;
-    white-space: nowrap;
-    transition: all 0.2s;
-  }
-  .share-btn:active { opacity: 0.7; }
-  .share-btn.copied {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: var(--accent-light);
-  }
-
-  /* 共有URL適用中バナー */
-  .shared-banner {
-    background: var(--accent-light);
-    border-bottom: 1px solid var(--accent);
-    color: var(--accent);
-    font-size: 12px;
-    text-align: center;
-    padding: 6px 16px;
-    display: none;
-  }
-  .shared-banner.visible { display: block; }
 </style>
 </head>
 <body>
@@ -563,14 +532,11 @@
     <h1>📦 発注管理</h1>
     <div class="header-right">
       <span class="reset-timer" id="reset-timer" style="display:none"></span>
-      <button class="share-btn" id="share-btn" onclick="copyShareURL()">🔗 並び順を共有</button>
       <span class="header-badge" id="check-count">0件</span>
     </div>
   </div>
   <div class="tabs" id="tabs"></div>
 </div>
-<!-- 共有URLから並び順を読み込んだ際に表示するバナー -->
-<div class="shared-banner" id="shared-banner">📋 共有された並び順を適用中</div>
 
 <div class="col-header">
   <span></span>
@@ -1110,8 +1076,7 @@ function drop(e, id) {
   if (dragSrcIndex === null || dragSrcIndex === targetIndex) return;
   const moved = products.splice(dragSrcIndex, 1)[0];
   products.splice(targetIndex, 0, moved);
-  // 並び替えのたびにlocalStorageへ自動保存
-  saveOrderToStorage();
+  saveOrderToFirebase();
   renderList();
 }
 function dragEnd(e) {
@@ -1160,7 +1125,7 @@ document.addEventListener('touchend', function(e) {
     if (touchDrag.srcIndex !== null && touchDrag.srcIndex !== targetIndex) {
       const moved = products.splice(touchDrag.srcIndex, 1)[0];
       products.splice(targetIndex, 0, moved);
-      saveOrderToStorage();
+      saveOrderToFirebase();
     }
   }
 
@@ -1205,110 +1170,25 @@ function closeOrderModal(e) { if (e.target === document.getElementById('order-mo
 function closeOrderModalDirect() { document.getElementById('order-modal').classList.remove('open'); }
 function completeOrder() {
   const now = Date.now();
-  // チェック済み商品の最終発注時刻を記録してからリセット
+  const historyUpdates = {};
   Object.values(allProducts).flat().forEach(p => {
-    if (p.checked && p.visible) orderHistory[p.id] = now;
+    if (p.checked && p.visible) {
+      orderHistory[p.id] = now;
+      historyUpdates[String(p.id)] = now;
+    }
     p.checked = false;
   });
-  saveOrderHistory();
+  // Firebase に履歴を書き込み・チェックをクリア
+  if (historyRef && Object.keys(historyUpdates).length > 0) {
+    historyRef.update(historyUpdates);
+  }
+  if (checksRef) checksRef.remove();
   localStorage.setItem('order-mgmt-last-reset', String(now));
-  if (checksRef) checksRef.remove(); // Firebase のチェックを一括クリア
   closeOrderModalDirect();
   renderList(); renderTabs();
   alert('✅ 発注完了！');
 }
 
-// ========== 並び順の共有（URLハッシュ方式） ==========
-
-/**
- * 現在の並び順をURLハッシュ文字列にエンコードする
- * 例: #z=3,0,1,2&s=10002,10000,10001
- */
-function encodeOrderToHash() {
-  const zIds = allProducts["雑貨"].map(p => p.id).join(',');
-  const sIds = allProducts["消耗品"].map(p => p.id).join(',');
-  return `#z=${zIds}&s=${sIds}`;
-}
-
-/**
- * URLハッシュから並び順を読み取り、allProductsを並べ替える
- * @returns {boolean} 並び順の適用に成功したかどうか
- */
-function applyOrderFromHash(hash) {
-  if (!hash || !hash.startsWith('#')) return false;
-  try {
-    const params = new URLSearchParams(hash.slice(1));
-    const zParam = params.get('z');
-    const sParam = params.get('s');
-    if (!zParam || !sParam) return false;
-
-    const reorder = (products, idStr) => {
-      const ids = idStr.split(',').map(Number);
-      // 読み込んだIDの数が現在の商品数と一致しない場合はスキップ
-      if (ids.length !== products.length) return false;
-      const map = new Map(products.map(p => [p.id, p]));
-      // 存在しないIDが含まれている場合はスキップ
-      if (ids.some(id => !map.has(id))) return false;
-      const reordered = ids.map(id => map.get(id));
-      reordered.forEach((p, i) => { products[i] = p; });
-      return true;
-    };
-
-    const ok1 = reorder(allProducts["雑貨"], zParam);
-    const ok2 = reorder(allProducts["消耗品"], sParam);
-    return ok1 && ok2;
-  } catch (e) {
-    console.warn('並び順の読み込みに失敗しました:', e);
-    return false;
-  }
-}
-
-/**
- * localStorage に並び順を保存する
- */
-function saveOrderToStorage() {
-  try {
-    const zIds = allProducts["雑貨"].map(p => p.id).join(',');
-    const sIds = allProducts["消耗品"].map(p => p.id).join(',');
-    localStorage.setItem('order-mgmt-order-z', zIds);
-    localStorage.setItem('order-mgmt-order-s', sIds);
-  } catch (e) { /* プライベートブラウズ等では無視 */ }
-}
-
-/**
- * localStorage から並び順を復元する
- * @returns {boolean} 復元に成功したかどうか
- */
-function loadOrderFromStorage() {
-  try {
-    const zParam = localStorage.getItem('order-mgmt-order-z');
-    const sParam = localStorage.getItem('order-mgmt-order-s');
-    if (!zParam || !sParam) return false;
-    return applyOrderFromHash(`#z=${zParam}&s=${sParam}`);
-  } catch (e) {
-    return false;
-  }
-}
-
-/**
- * 現在の並び順をURLにエンコードしてクリップボードにコピーする
- */
-function copyShareURL() {
-  const hash = encodeOrderToHash();
-  const url = location.href.split('#')[0] + hash;
-  navigator.clipboard.writeText(url).then(() => {
-    const btn = document.getElementById('share-btn');
-    btn.textContent = '✅ コピーしました';
-    btn.classList.add('copied');
-    setTimeout(() => {
-      btn.textContent = '🔗 並び順を共有';
-      btn.classList.remove('copied');
-    }, 2000);
-  }).catch(() => {
-    // clipboard APIが使えない場合はpromptで表示
-    prompt('以下のURLをコピーしてください', url);
-  });
-}
 
 // ========== Firebase リアルタイム同期（チェック状態の共有） ==========
 // ★ 以下の firebaseConfig に、Firebaseコンソールで取得した値を貼り付けてください
@@ -1325,30 +1205,71 @@ const firebaseConfig = {
   appId:             "1:804791865586:web:1dcda3acfc150a3868c06b"
 };
 
-// checksRef: Firebase Realtime Database の参照（未設定時は null）
-let checksRef = null;
+// Firebase Realtime Database の参照（未設定時は null）
+let checksRef  = null; // チェック状態
+let historyRef = null; // 発注履歴（色分け）
+let orderRef   = null; // 並び順
+
+/** Firebase に並び順を保存する */
+function saveOrderToFirebase() {
+  if (!orderRef) return;
+  const zIds = allProducts["雑貨"].map(p => p.id).join(',');
+  const sIds = allProducts["消耗品"].map(p => p.id).join(',');
+  orderRef.set({ zakka: zIds, shomohin: sIds });
+}
+
+/** IDの文字列（カンマ区切り）を元に商品配列を並べ替える */
+function applyOrderFromIdString(products, idStr) {
+  try {
+    const ids = idStr.split(',').map(Number);
+    if (ids.length !== products.length) return;
+    const map = new Map(products.map(p => [p.id, p]));
+    if (ids.some(id => !map.has(id))) return;
+    ids.forEach((id, i) => { products[i] = map.get(id); });
+  } catch (e) {}
+}
 
 (function initFirebase() {
   if (firebaseConfig.apiKey === 'YOUR_API_KEY') {
-    console.info('Firebase未設定のため、チェック同期は無効です。');
+    console.info('Firebase未設定のため同期は無効です。');
     return;
   }
   try {
     firebase.initializeApp(firebaseConfig);
-    checksRef = firebase.database().ref('checks');
+    const db = firebase.database();
+    checksRef  = db.ref('checks');
+    historyRef = db.ref('orderHistory');
+    orderRef   = db.ref('order');
 
-    // 全クライアントにリアルタイムでチェック状態を配信
+    // ① チェック状態：全員にリアルタイム反映
     checksRef.on('value', (snapshot) => {
       const data = snapshot.val() || {};
-      // いったん全チェックをリセット
       Object.values(allProducts).flat().forEach(p => { p.checked = false; });
-      // Firebase の状態を反映
       Object.keys(data).forEach(id => {
         const p = findProduct(parseInt(id));
         if (p && p.visible) p.checked = true;
       });
       renderList(); renderTabs();
     });
+
+    // ② 発注履歴：色分けをリアルタイム反映
+    historyRef.on('value', (snapshot) => {
+      const data = snapshot.val() || {};
+      Object.keys(data).forEach(id => {
+        orderHistory[parseInt(id)] = data[id];
+      });
+      renderList();
+    });
+
+    // ③ 並び順：全員の並びをリアルタイム反映
+    orderRef.on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
+      if (data.zakka)    applyOrderFromIdString(allProducts["雑貨"],   data.zakka);
+      if (data.shomohin) applyOrderFromIdString(allProducts["消耗品"], data.shomohin);
+      renderList();
+    });
+
   } catch (e) {
     console.warn('Firebase初期化失敗:', e);
   }
@@ -1356,19 +1277,10 @@ let checksRef = null;
 
 // ========== 初期化 ==========
 
-// 1. URLハッシュに並び順が含まれる場合は最優先で適用（共有URLを開いたとき）
-const sharedFromURL = applyOrderFromHash(location.hash);
-if (sharedFromURL) {
-  document.getElementById('shared-banner').classList.add('visible');
-  saveOrderToStorage();
-} else {
-  loadOrderFromStorage();
-}
-
-// 2. 前回アクセス以降にリセット時刻を過ぎていたら自動リセット
+// 前回アクセス以降にリセット時刻を過ぎていたら自動リセット
 checkScheduledReset();
 
-// 3. 次回リセット時刻をヘッダーに表示
+// 次回リセット時刻をヘッダーに表示
 updateResetTimer();
 
 renderTabs();
