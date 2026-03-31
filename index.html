@@ -102,6 +102,7 @@
     overflow-x: auto;
     scrollbar-width: none;
     padding-bottom: 2px;
+    align-items: center;
   }
   .tabs::-webkit-scrollbar { display: none; }
   .tab {
@@ -116,12 +117,72 @@
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
+    font-family: inherit;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .tab.active {
     background: var(--accent);
     border-color: var(--accent);
     color: white;
   }
+
+  /* タブ追加ボタン */
+  .tab-add-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1.5px dashed var(--border);
+    background: transparent;
+    color: var(--text-sub);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 400;
+    font-family: inherit;
+    transition: all 0.15s;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .tab-add-btn:active { opacity: 0.6; }
+
+  /* タブ操作コンテキストメニュー */
+  .tab-ctx-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+  }
+  .tab-ctx-overlay.open { display: block; }
+  .tab-ctx-menu {
+    position: absolute;
+    background: var(--surface);
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    min-width: 160px;
+  }
+  .tab-ctx-btn {
+    display: block;
+    width: 100%;
+    padding: 12px 16px;
+    border: none;
+    background: none;
+    text-align: left;
+    font-size: 14px;
+    font-family: inherit;
+    cursor: pointer;
+    color: var(--text);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .tab-ctx-btn:active { background: var(--bg); }
+  .tab-ctx-btn + .tab-ctx-btn { border-top: 1px solid var(--border); }
+  .tab-ctx-delete { color: var(--danger); }
 
   /* 列ヘッダー */
   .col-header {
@@ -161,7 +222,6 @@
     transition: all 0.2s;
     cursor: default;
     box-shadow: var(--shadow);
-    /* iOS/Android 長押しメニューを防止 */
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -383,6 +443,8 @@
     max-width: 480px;
     transform: translateY(100%);
     transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    max-height: 90vh;
+    overflow-y: auto;
   }
   .modal-overlay.open .modal {
     transform: translateY(0);
@@ -453,6 +515,56 @@
   .btn:active { opacity: 0.75; }
   .btn-primary { background: var(--accent); color: white; }
   .btn-secondary { background: var(--bg); color: var(--text); border: 1.5px solid var(--border); }
+
+  /* タブチェックリスト（商品詳細モーダル内） */
+  .tab-check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .tab-check-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    border: 1.5px solid var(--border);
+    background: var(--bg);
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    transition: all 0.15s;
+  }
+  .tab-check-item.active {
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+  .tab-check-item-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+    color: transparent;
+  }
+  .tab-check-item.active .tab-check-item-icon {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .tab-check-item-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .tab-check-item.active .tab-check-item-label {
+    color: var(--accent);
+  }
 
   /* 発注確認バー */
   .order-bar {
@@ -632,6 +744,11 @@
       <label>発注数（デフォルト）</label>
       <input type="number" id="modal-order" min="1">
     </div>
+    <!-- 表示するタブの選択（カスタムタブがある場合のみ表示） -->
+    <div class="modal-field" id="modal-tabs-field" style="display:none">
+      <label>表示するタブ</label>
+      <div class="tab-check-list" id="modal-tabs"></div>
+    </div>
     <div class="modal-field">
       <label>色の設定（手動上書き）</label>
       <div class="color-selector" id="modal-color"></div>
@@ -666,9 +783,34 @@
   </div>
 </div>
 
+<!-- タブ操作コンテキストメニュー（カスタムタブの長押しで表示） -->
+<div class="tab-ctx-overlay" id="tab-ctx-overlay" onclick="closeTabCtx()">
+  <div class="tab-ctx-menu" id="tab-ctx-menu" onclick="event.stopPropagation()">
+    <button class="tab-ctx-btn" onclick="openTabRename()">✏️ 名前を変更</button>
+    <button class="tab-ctx-btn tab-ctx-delete" onclick="confirmTabDelete()">🗑️ 削除</button>
+  </div>
+</div>
+
+<!-- タブ追加・名前変更ボトムシート -->
+<div class="modal-overlay" id="tab-sheet" onclick="closeTabSheet(event)">
+  <div class="modal">
+    <div class="modal-bar"></div>
+    <h2 id="tab-sheet-title">新しい場所を追加</h2>
+    <div class="modal-field">
+      <label>場所名</label>
+      <input type="text" id="tab-sheet-input" placeholder="例：バックヤード" maxlength="20">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeTabSheetDirect()">キャンセル</button>
+      <button class="btn btn-primary" onclick="confirmTabSheet()">保存</button>
+    </div>
+  </div>
+</div>
+
 <script>
-// ========== 商品データ ==========
-const TABS = ["雑貨", "消耗品"];
+// ========== 商品データ（生データ） ==========
+// デフォルトタブ（変更不可の固定タブ）
+const DEFAULT_TABS = ["雑貨", "消耗品"];
 
 const RAW_ZAKKA = `デザートスプーン １，０００個
 スムージー用ＰＨＢＨストロー８Ｍ３００本入
@@ -862,12 +1004,22 @@ function autoOrderQty(name) {
   return parseInt(m[1].replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[,，]/g, ''));
 }
 
+// HTML属性値用エスケープ（データ属性に安全に格納するため）
+function escapeAttr(s) {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+// HTML表示用エスケープ
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function makeProducts(rawList, tab, startId) {
   return rawList.map((line, i) => {
     const clean = line.replace(/[◆◎△▲]/g, '').trim();
     return {
       id: startId + i,
-      tab,
+      tabs: [tab],  // 所属タブの配列（複数タブに同時に追加可能）
       fullName: clean,
       shortName: autoShorten(clean),
       minStock: 1,
@@ -880,7 +1032,28 @@ function makeProducts(rawList, tab, startId) {
 
 const zakkaProducts    = makeProducts(RAW_ZAKKA,    "雑貨",   0);
 const shomohinProducts = makeProducts(RAW_SHOMOHIN, "消耗品", 10000);
+
+// タブ名をキーとした商品配列のマップ（カスタムタブも動的に追加される）
 const allProducts = { "雑貨": zakkaProducts, "消耗品": shomohinProducts };
+
+// ========== カスタムタブの初期化（localStorage から同期読み込み） ==========
+let customTabs = [];
+try {
+  const saved = localStorage.getItem('order-mgmt-custom-tabs');
+  if (saved) customTabs = JSON.parse(saved);
+} catch(e) {}
+
+// カスタムタブの商品配列を初期化
+customTabs.forEach(tab => {
+  if (!allProducts[tab]) allProducts[tab] = [];
+});
+
+// 商品のタブ所属をlocalStorageから読み込む
+// （applyProductTabsDataはfunction宣言のためホイストされており、後方定義でも問題なし）
+try {
+  const saved = localStorage.getItem('order-mgmt-product-tabs');
+  if (saved) applyProductTabsData(JSON.parse(saved));
+} catch(e) {}
 
 // ========== 発注履歴（色分け用） ==========
 // { productId: 最終発注タイムスタンプ }
@@ -903,12 +1076,10 @@ function saveOrderHistory() {
  *   赤:   1ヶ月以上発注なし
  */
 function getHistoryClass(id) {
-  // 手動上書きが優先
   const ov = colorOverride[id];
   if (ov === 'none') return '';
   if (ov)            return `hist-${ov}`;
 
-  // 発注履歴による自動判定
   const ts = orderHistory[id];
   if (!ts) return '';
   const age   = Date.now() - ts;
@@ -925,7 +1096,63 @@ let dragSrcIndex  = null;
 let modalTargetId = null;
 let currentFilter = 'all'; // 'all' | 'blue' | 'yellow' | 'red' | 'none'
 
-function getProducts() { return allProducts[currentTab]; }
+// 現在有効な全タブを返す（デフォルト + カスタム）
+function getTabs() { return [...DEFAULT_TABS, ...customTabs]; }
+
+// 現在表示中タブの商品配列を返す
+function getProducts() { return allProducts[currentTab] || []; }
+
+// 全タブをまたいで重複なしで商品を返す（チェック集計・発注処理用）
+function getAllProductsUnique() {
+  const seen = new Set();
+  const result = [];
+  getTabs().forEach(tab => {
+    (allProducts[tab] || []).forEach(p => {
+      if (!seen.has(p.id)) { seen.add(p.id); result.push(p); }
+    });
+  });
+  return result;
+}
+
+// IDから商品オブジェクトを検索する
+function findProduct(id) {
+  return getAllProductsUnique().find(p => p.id === id) || null;
+}
+
+/**
+ * 商品のタブ所属データ（localStorageまたはFirebase）を適用する
+ * data: { "productId": "タブ1,タブ2", ... }
+ */
+function applyProductTabsData(data) {
+  // まず全商品の参照マップを作成（重複を避けるため直接参照）
+  const allProdsFlat = new Map();
+  Object.values(allProducts).flat().forEach(p => {
+    if (!allProdsFlat.has(p.id)) allProdsFlat.set(p.id, p);
+  });
+
+  Object.keys(data).forEach(idStr => {
+    const id = parseInt(idStr);
+    const p = allProdsFlat.get(id);
+    if (!p) return;
+
+    const newTabs = data[idStr].split(',').filter(t => t);
+
+    // 各タブのallProducts配列を調整する
+    getTabs().forEach(tab => {
+      const shouldBeIn = newTabs.includes(tab);
+      const arr = allProducts[tab] || [];
+      const isIn = arr.includes(p);
+
+      if (shouldBeIn && !isIn && allProducts[tab]) {
+        allProducts[tab].push(p);
+      } else if (!shouldBeIn && isIn) {
+        allProducts[tab].splice(arr.indexOf(p), 1);
+      }
+    });
+
+    p.tabs = newTabs;
+  });
+}
 
 // ========== スケジュールリセット（月・水・金 朝6時） ==========
 const RESET_DAYS = [1, 3, 5]; // 月=1, 水=3, 金=5
@@ -960,8 +1187,9 @@ function checkScheduledReset() {
 
 /** チェックをリセットして画面を更新する */
 function doReset(showAlert = true) {
-  Object.values(allProducts).flat().forEach(p => { p.checked = false; });
-  if (checksRef) checksRef.remove(); // Firebase のチェックも一括クリア
+  // 重複なしで全商品をリセット
+  getAllProductsUnique().forEach(p => { p.checked = false; });
+  if (checksRef) checksRef.remove();
   renderList(); renderTabs();
   if (showAlert) alert('✅ 発注完了！');
 }
@@ -974,20 +1202,27 @@ function updateResetTimer() {
   timerEl.style.display = '';
   const remaining = next - Date.now();
   timerEl.textContent = `🔄 次回リセット: ${DAY_NAMES[next.getDay()]}曜 ${RESET_HOUR}:00`;
-  timerEl.classList.toggle('soon', remaining < 3 * 3600000); // 3時間以内で赤表示
+  timerEl.classList.toggle('soon', remaining < 3 * 3600000);
 }
 
 // 1分ごとにスケジュールリセットを確認
 setInterval(() => { checkScheduledReset(); updateResetTimer(); }, 60000);
 
-// ========== タブ ==========
+// ========== タブ描画 ==========
 function renderTabs() {
   const el = document.getElementById('tabs');
-  el.innerHTML = TABS.map(tab => {
-    const count = allProducts[tab].filter(p => p.checked && p.visible).length;
-    const badge = count > 0 ? ` <span style="background:rgba(255,255,255,0.35);border-radius:10px;padding:0 6px;font-size:11px;">${count}</span>` : '';
-    return `<button class="tab ${tab === currentTab ? 'active' : ''}" onclick="switchTab('${tab}')">${tab}${badge}</button>`;
+  const tabs = getTabs();
+  let html = tabs.map(tab => {
+    const isCustom = customTabs.includes(tab);
+    const count = (allProducts[tab] || []).filter(p => p.checked && p.visible).length;
+    const badge = count > 0
+      ? `<span style="background:rgba(255,255,255,0.35);border-radius:10px;padding:0 6px;font-size:11px;">${count}</span>`
+      : '';
+    // data-tab属性でタブ名を安全に保持（日本語や特殊文字に対応）
+    return `<button class="tab ${tab === currentTab ? 'active' : ''}" data-tab="${escapeAttr(tab)}" data-custom="${isCustom}">${escapeHtml(tab)}${badge}</button>`;
   }).join('');
+  html += `<button class="tab-add-btn" id="tab-add-btn">＋</button>`;
+  el.innerHTML = html;
 }
 
 function switchTab(tab) {
@@ -996,6 +1231,175 @@ function switchTab(tab) {
   renderTabs();
   renderFilterBar();
   renderList();
+}
+
+// ========== タブのクリック・長押しイベント（イベント委譲） ==========
+{
+  const tabsEl = document.getElementById('tabs');
+  let lpTimer = null;
+  let lpDone  = false;
+
+  // クリック：タブ切り替え or 追加ボタン
+  tabsEl.addEventListener('click', (e) => {
+    if (lpDone) { lpDone = false; return; } // 長押し後のクリックを無視
+    if (e.target.closest('#tab-add-btn')) { openTabSheet('add'); return; }
+    const btn = e.target.closest('.tab[data-tab]');
+    if (btn) switchTab(btn.dataset.tab);
+  });
+
+  // タッチ長押し：カスタムタブのみ操作メニューを表示
+  tabsEl.addEventListener('touchstart', (e) => {
+    const btn = e.target.closest('.tab[data-tab]');
+    if (!btn || btn.dataset.custom !== 'true') return;
+    lpDone = false;
+    const touch = e.touches[0];
+    lpTimer = setTimeout(() => {
+      lpDone = true;
+      openTabCtx(btn.dataset.tab, touch.clientX, touch.clientY);
+    }, 500);
+  }, { passive: true });
+
+  tabsEl.addEventListener('touchend',  () => { clearTimeout(lpTimer); lpTimer = null; });
+  tabsEl.addEventListener('touchmove', () => { clearTimeout(lpTimer); lpTimer = null; });
+}
+
+// ========== タブ管理 ==========
+let tabCtxTargetTab   = null;  // コンテキストメニューの対象タブ名
+let tabSheetMode      = 'add'; // 'add' | 'rename'
+let tabSheetTargetTab = null;  // 名前変更対象のタブ名
+
+/** カスタムタブのコンテキストメニューを表示する */
+function openTabCtx(tabName, x, y) {
+  tabCtxTargetTab = tabName;
+  const overlay = document.getElementById('tab-ctx-overlay');
+  const menu    = document.getElementById('tab-ctx-menu');
+  overlay.classList.add('open');
+  // メニューが画面外にはみ出さないよう位置を調整
+  requestAnimationFrame(() => {
+    const maxX = window.innerWidth  - menu.offsetWidth  - 8;
+    const maxY = window.innerHeight - menu.offsetHeight - 8;
+    menu.style.left = Math.min(x, maxX) + 'px';
+    menu.style.top  = Math.min(y + 4, maxY) + 'px';
+  });
+}
+
+function closeTabCtx() {
+  document.getElementById('tab-ctx-overlay').classList.remove('open');
+}
+
+function openTabRename() {
+  closeTabCtx();
+  openTabSheet('rename', tabCtxTargetTab);
+}
+
+function confirmTabDelete() {
+  closeTabCtx();
+  const tab   = tabCtxTargetTab;
+  const count = (allProducts[tab] || []).length;
+  const msg   = count > 0
+    ? `「${tab}」を削除しますか？\n（このタブに追加中の ${count} 件はこのタブから削除されます。元のタブには残ります。）`
+    : `「${tab}」を削除しますか？`;
+  if (confirm(msg)) deleteTab(tab);
+}
+
+/** タブ追加・名前変更のボトムシートを開く */
+function openTabSheet(mode, tabName) {
+  tabSheetMode      = mode;
+  tabSheetTargetTab = tabName || null;
+  document.getElementById('tab-sheet-title').textContent =
+    mode === 'add' ? '新しい場所を追加' : '場所名を変更';
+  document.getElementById('tab-sheet-input').value = mode === 'rename' ? tabName : '';
+  document.getElementById('tab-sheet').classList.add('open');
+  setTimeout(() => document.getElementById('tab-sheet-input').focus(), 300);
+}
+
+function closeTabSheet(e) {
+  if (e.target === document.getElementById('tab-sheet')) closeTabSheetDirect();
+}
+
+function closeTabSheetDirect() {
+  document.getElementById('tab-sheet').classList.remove('open');
+}
+
+function confirmTabSheet() {
+  const name = document.getElementById('tab-sheet-input').value.trim();
+  if (!name) return;
+  if (tabSheetMode === 'add') addTab(name);
+  else renameTab(tabSheetTargetTab, name);
+  closeTabSheetDirect();
+}
+
+// Enterキーでも確定できるようにする
+document.getElementById('tab-sheet-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') confirmTabSheet();
+});
+
+/** 新しいカスタムタブを追加する */
+function addTab(name) {
+  if (getTabs().includes(name)) { alert(`「${name}」は既に存在します`); return; }
+  customTabs.push(name);
+  allProducts[name] = [];
+  saveCustomTabs();
+  currentTab = name;
+  renderTabs();
+  renderFilterBar();
+  renderList();
+}
+
+/** カスタムタブの名前を変更する（商品のtabs配列も更新） */
+function renameTab(oldName, newName) {
+  if (getTabs().includes(newName)) { alert(`「${newName}」は既に存在します`); return; }
+  const idx = customTabs.indexOf(oldName);
+  if (idx !== -1) customTabs[idx] = newName;
+  // allProductsのキーを新名前に移行
+  allProducts[newName] = allProducts[oldName] || [];
+  delete allProducts[oldName];
+  // 全商品のtabs配列を更新
+  getAllProductsUnique().forEach(p => {
+    const ti = p.tabs.indexOf(oldName);
+    if (ti !== -1) p.tabs[ti] = newName;
+  });
+  if (currentTab === oldName) currentTab = newName;
+  saveCustomTabs();
+  saveProductTabs();
+  saveOrderToFirebase();
+  renderTabs(); renderFilterBar(); renderList();
+}
+
+/** カスタムタブを削除する（商品は元のタブに残る） */
+function deleteTab(name) {
+  const idx = customTabs.indexOf(name);
+  if (idx !== -1) customTabs.splice(idx, 1);
+  if (allProducts[name]) {
+    // 商品のtabs配列から削除したタブを除去する
+    allProducts[name].forEach(p => {
+      const ti = p.tabs.indexOf(name);
+      if (ti !== -1) p.tabs.splice(ti, 1);
+    });
+    delete allProducts[name];
+  }
+  // FirebaseのOrderデータから削除
+  if (orderRef) orderRef.child(encodeURIComponent(name)).remove();
+  saveCustomTabs();
+  saveProductTabs();
+  if (currentTab === name) currentTab = getTabs()[0];
+  renderTabs(); renderFilterBar(); renderList();
+}
+
+/** カスタムタブ一覧をlocalStorageとFirebaseに保存する */
+function saveCustomTabs() {
+  try { localStorage.setItem('order-mgmt-custom-tabs', JSON.stringify(customTabs)); } catch(e) {}
+  if (customTabsRef) customTabsRef.set(customTabs.join(',') || null);
+}
+
+/** 商品のタブ所属をlocalStorageとFirebaseに保存する */
+function saveProductTabs() {
+  const data = {};
+  getAllProductsUnique().forEach(p => {
+    data[String(p.id)] = p.tabs.join(',');
+  });
+  try { localStorage.setItem('order-mgmt-product-tabs', JSON.stringify(data)); } catch(e) {}
+  if (productTabsRef) productTabsRef.set(Object.keys(data).length > 0 ? data : null);
 }
 
 // ========== フィルターバー ==========
@@ -1009,7 +1413,7 @@ function renderFilterBar() {
     none:   visibles.filter(p => getHistoryClass(p.id) === '').length,
   };
   const filters = [
-    { id: 'all',    label: 'すべて',  cls: '' },
+    { id: 'all',    label: 'すべて',   cls: '' },
     { id: 'blue',   label: '🔵 今週',  cls: 'f-blue' },
     { id: 'yellow', label: '🟡 今月',  cls: 'f-yellow' },
     { id: 'red',    label: '🔴 古い',  cls: 'f-red' },
@@ -1102,7 +1506,6 @@ function toggleCheck(id) {
     }
     // UI 更新は Firebase リスナーが担うのでここでは行わない
   } else {
-    // Firebase 未設定時はローカルのみ更新
     p.checked = newVal;
     renderList(); renderTabs();
   }
@@ -1159,13 +1562,9 @@ function selectNum(val) {
   renderList();
 }
 
-function findProduct(id) {
-  return Object.values(allProducts).flat().find(p => p.id === id);
-}
-
 function updateBar() {
-  const all = Object.values(allProducts).flat();
-  const checked = all.filter(p => p.checked && p.visible);
+  // 重複なしで全商品からチェック済みを集計する
+  const checked = getAllProductsUnique().filter(p => p.checked && p.visible);
   const bar = document.getElementById('order-bar');
   document.getElementById('check-count').textContent = checked.length + '件';
   document.getElementById('bar-text').textContent = checked.length + '件を発注';
@@ -1250,7 +1649,10 @@ document.addEventListener('touchend', function(e) {
   renderList();
 });
 
-// ========== モーダル ==========
+// ========== 商品詳細モーダル ==========
+let modalTabSelection   = [];  // モーダルで選択中のタブ一覧
+let modalColorSelection = null; // モーダルで選択中の色
+
 function openModal(id) {
   modalTargetId = id;
   const p = findProduct(id);
@@ -1261,7 +1663,41 @@ function openModal(id) {
   // 現在の上書き色をセット（未設定なら null = 自動）
   modalColorSelection = colorOverride[id] !== undefined ? colorOverride[id] : null;
   renderModalColorSelector();
+  renderModalTabs(p.tabs);
   document.getElementById('modal').classList.add('open');
+}
+
+/** 商品詳細モーダルのタブチェックボックスを描画する */
+function renderModalTabs(currentTabs) {
+  modalTabSelection = [...currentTabs];
+  const field = document.getElementById('modal-tabs-field');
+  const list  = document.getElementById('modal-tabs');
+
+  // カスタムタブがない場合は表示しない
+  if (customTabs.length === 0) { field.style.display = 'none'; return; }
+  field.style.display = '';
+
+  list.innerHTML = getTabs().map(tab => {
+    const isActive = modalTabSelection.includes(tab);
+    return `
+      <div class="tab-check-item ${isActive ? 'active' : ''}" data-tab="${escapeAttr(tab)}" onclick="toggleModalTab(this.dataset.tab)">
+        <div class="tab-check-item-icon">${isActive ? '✓' : ''}</div>
+        <div class="tab-check-item-label">${escapeHtml(tab)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+/** モーダル内でタブのチェック状態を切り替える（最低1つは必須） */
+function toggleModalTab(tab) {
+  const idx = modalTabSelection.indexOf(tab);
+  if (idx !== -1) {
+    if (modalTabSelection.length <= 1) return; // 最低1タブは必須
+    modalTabSelection.splice(idx, 1);
+  } else {
+    modalTabSelection.push(tab);
+  }
+  renderModalTabs(modalTabSelection);
 }
 
 function renderModalColorSelector() {
@@ -1292,8 +1728,8 @@ function saveModal() {
   if (modalTargetId === null) return;
   const p = findProduct(modalTargetId);
   p.shortName = document.getElementById('modal-shortname').value || autoShorten(p.fullName);
-  p.minStock = parseInt(document.getElementById('modal-min').value) || 0;
-  p.orderQty = parseInt(document.getElementById('modal-order').value) || 1;
+  p.minStock  = parseInt(document.getElementById('modal-min').value)   || 0;
+  p.orderQty  = parseInt(document.getElementById('modal-order').value) || 1;
 
   // 色の手動上書きを保存（null = 自動に戻す）
   if (modalColorSelection === null) {
@@ -1304,14 +1740,41 @@ function saveModal() {
     if (colorOverrideRef) colorOverrideRef.child(String(modalTargetId)).set(modalColorSelection);
   }
 
+  // タブ所属の変更を保存（カスタムタブが存在する場合のみ）
+  if (customTabs.length > 0) {
+    const oldTabs = [...p.tabs];
+    const newTabs = [...modalTabSelection];
+
+    // 削除されたタブからproductを除去
+    oldTabs.forEach(tab => {
+      if (!newTabs.includes(tab) && allProducts[tab]) {
+        const idx = allProducts[tab].indexOf(p);
+        if (idx !== -1) allProducts[tab].splice(idx, 1);
+      }
+    });
+
+    // 追加されたタブにproductを追加（末尾に追加）
+    newTabs.forEach(tab => {
+      if (!oldTabs.includes(tab) && allProducts[tab] !== undefined) {
+        if (!allProducts[tab].includes(p)) allProducts[tab].push(p);
+      }
+    });
+
+    p.tabs = newTabs;
+    saveProductTabs();
+    saveOrderToFirebase();
+  }
+
   closeModalDirect();
   renderFilterBar();
   renderList();
+  renderTabs();
 }
 
 // ========== 発注確認 ==========
 function openOrderModal() {
-  const checked = Object.values(allProducts).flat().filter(p => p.checked && p.visible);
+  // 重複なしで全タブから発注対象を集計する
+  const checked = getAllProductsUnique().filter(p => p.checked && p.visible);
   document.getElementById('order-modal-list').innerHTML = checked.map(p => `
     <div class="order-item-row">
       <span>${p.shortName}</span>
@@ -1322,10 +1785,12 @@ function openOrderModal() {
 }
 function closeOrderModal(e) { if (e.target === document.getElementById('order-modal')) closeOrderModalDirect(); }
 function closeOrderModalDirect() { document.getElementById('order-modal').classList.remove('open'); }
+
 function completeOrder() {
   const now = Date.now();
   const historyUpdates = {};
-  Object.values(allProducts).flat().forEach(p => {
+  // 重複なしで全商品を処理する
+  getAllProductsUnique().forEach(p => {
     if (p.checked && p.visible) {
       orderHistory[p.id] = now;
       historyUpdates[String(p.id)] = now;
@@ -1344,11 +1809,7 @@ function completeOrder() {
 }
 
 
-// ========== Firebase リアルタイム同期（チェック状態の共有） ==========
-// ★ 以下の firebaseConfig に、Firebaseコンソールで取得した値を貼り付けてください
-//   設定手順: https://console.firebase.google.com
-//   プロジェクト設定 → マイアプリ → CDN の設定オブジェクトをコピー
-
+// ========== Firebase リアルタイム同期 ==========
 const firebaseConfig = {
   apiKey:            "AIzaSyD73u49DYu8V_1jSob5WGrah1BRfM2jKhs",
   authDomain:        "order-management-f9f19.firebaseapp.com",
@@ -1359,32 +1820,44 @@ const firebaseConfig = {
   appId:             "1:804791865586:web:1dcda3acfc150a3868c06b"
 };
 
-// Firebase Realtime Database の参照（未設定時は null）
-let checksRef       = null; // チェック状態
-let historyRef      = null; // 発注履歴（色分け）
-let orderRef        = null; // 並び順
+let checksRef        = null; // チェック状態
+let historyRef       = null; // 発注履歴（色分け）
+let orderRef         = null; // 並び順
 let colorOverrideRef = null; // 色の手動上書き
+let customTabsRef    = null; // カスタムタブ一覧
+let productTabsRef   = null; // 商品のタブ所属
 
-// 色の手動上書き設定 { productId: 'blue'|'yellow'|'red'|'none'|null }
 let colorOverride = {};
-let modalColorSelection = null; // モーダルで選択中の色
 
-/** Firebase に並び順を保存する */
+// productTabsの最新データをキャッシュ（customTabs更新時に再適用するため）
+let lastProductTabsData = {};
+
+/** Firebase に並び順を保存する（全タブ対応、旧フォーマット互換キーも維持） */
 function saveOrderToFirebase() {
   if (!orderRef) return;
-  const zIds = allProducts["雑貨"].map(p => p.id).join(',');
-  const sIds = allProducts["消耗品"].map(p => p.id).join(',');
-  orderRef.set({ zakka: zIds, shomohin: sIds });
+  const data = {
+    zakka:    allProducts["雑貨"].map(p => p.id).join(','),    // 旧フォーマット互換
+    shomohin: allProducts["消耗品"].map(p => p.id).join(','),  // 旧フォーマット互換
+  };
+  // 新フォーマット：タブ名をキーとして保存
+  getTabs().forEach(tab => {
+    if (allProducts[tab]) data[tab] = allProducts[tab].map(p => p.id).join(',');
+  });
+  orderRef.set(data);
 }
 
-/** IDの文字列（カンマ区切り）を元に商品配列を並べ替える */
+/** IDの文字列（カンマ区切り）を元に商品配列を並べ替える（部分的なマッチも許容） */
 function applyOrderFromIdString(products, idStr) {
   try {
-    const ids = idStr.split(',').map(Number);
-    if (ids.length !== products.length) return;
-    const map = new Map(products.map(p => [p.id, p]));
-    if (ids.some(id => !map.has(id))) return;
-    ids.forEach((id, i) => { products[i] = map.get(id); });
+    const ids   = idStr.split(',').map(Number).filter(id => !isNaN(id));
+    const idSet = new Set(ids);
+    const map   = new Map(products.map(p => [p.id, p]));
+    // 保存された順でマッチするものを先に並べ、残りを後ろに追加
+    const ordered   = ids.filter(id => map.has(id)).map(id => map.get(id));
+    const remaining = products.filter(p => !idSet.has(p.id));
+    const sorted    = [...ordered, ...remaining];
+    sorted.forEach((p, i) => { products[i] = p; });
+    products.length = sorted.length;
   } catch (e) {}
 }
 
@@ -1400,11 +1873,14 @@ function applyOrderFromIdString(products, idStr) {
     historyRef       = db.ref('orderHistory');
     orderRef         = db.ref('order');
     colorOverrideRef = db.ref('colorOverride');
+    customTabsRef    = db.ref('customTabs');
+    productTabsRef   = db.ref('productTabs');
 
     // ① チェック状態：全員にリアルタイム反映
     checksRef.on('value', (snapshot) => {
       const data = snapshot.val() || {};
-      Object.values(allProducts).flat().forEach(p => { p.checked = false; });
+      // 重複なしで全商品のチェックをリセットしてから再適用
+      getAllProductsUnique().forEach(p => { p.checked = false; });
       Object.keys(data).forEach(id => {
         const p = findProduct(parseInt(id));
         if (p && p.visible) p.checked = true;
@@ -1412,7 +1888,7 @@ function applyOrderFromIdString(products, idStr) {
       renderList(); renderTabs();
     });
 
-    // ② 発注履歴：色分けをリアルタイム反映（フィルターカウントも更新）
+    // ② 発注履歴：色分けをリアルタイム反映
     historyRef.on('value', (snapshot) => {
       const data = snapshot.val() || {};
       Object.keys(data).forEach(id => {
@@ -1422,20 +1898,74 @@ function applyOrderFromIdString(products, idStr) {
       renderList();
     });
 
-    // ④ 色の手動上書き：全員にリアルタイム反映
+    // ③ 色の手動上書き：全員にリアルタイム反映
     colorOverrideRef.on('value', (snapshot) => {
       colorOverride = snapshot.val() || {};
       renderFilterBar();
       renderList();
     });
 
-    // ③ 並び順：全員の並びをリアルタイム反映
+    // ④ 並び順：全員の並びをリアルタイム反映（旧フォーマット互換）
     orderRef.on('value', (snapshot) => {
       const data = snapshot.val();
       if (!data) return;
-      if (data.zakka)    applyOrderFromIdString(allProducts["雑貨"],   data.zakka);
-      if (data.shomohin) applyOrderFromIdString(allProducts["消耗品"], data.shomohin);
+      // デフォルトタブ（旧フォーマットも考慮）
+      const zakkaData    = data["雑貨"]   !== undefined ? data["雑貨"]   : data.zakka;
+      const shomohinData = data["消耗品"] !== undefined ? data["消耗品"] : data.shomohin;
+      if (zakkaData)    applyOrderFromIdString(allProducts["雑貨"],   zakkaData);
+      if (shomohinData) applyOrderFromIdString(allProducts["消耗品"], shomohinData);
+      // カスタムタブの並び順を適用
+      customTabs.forEach(tab => {
+        if (data[tab] && allProducts[tab]) applyOrderFromIdString(allProducts[tab], data[tab]);
+      });
       renderList();
+    });
+
+    // ⑤ カスタムタブ：他のデバイスでの追加・削除・名前変更を反映
+    customTabsRef.on('value', (snapshot) => {
+      const val        = snapshot.val() || '';
+      const serverTabs = val ? val.split(',').filter(t => t) : [];
+
+      // 追加されたタブを反映
+      serverTabs.forEach(tab => {
+        if (!customTabs.includes(tab)) {
+          customTabs.push(tab);
+          if (!allProducts[tab]) allProducts[tab] = [];
+        }
+      });
+
+      // 削除されたタブを除去（デフォルトタブは変更しない）
+      [...customTabs].forEach(tab => {
+        if (!serverTabs.includes(tab)) {
+          if (allProducts[tab]) {
+            allProducts[tab].forEach(p => {
+              const ti = p.tabs.indexOf(tab);
+              if (ti !== -1) p.tabs.splice(ti, 1);
+            });
+            delete allProducts[tab];
+          }
+          customTabs.splice(customTabs.indexOf(tab), 1);
+        }
+      });
+
+      try { localStorage.setItem('order-mgmt-custom-tabs', JSON.stringify(customTabs)); } catch(e) {}
+
+      // タブ構成変更後に商品のタブ所属を再適用する
+      if (Object.keys(lastProductTabsData).length > 0) {
+        applyProductTabsData(lastProductTabsData);
+      }
+
+      if (!getTabs().includes(currentTab)) currentTab = "雑貨";
+      renderTabs(); renderFilterBar(); renderList();
+    });
+
+    // ⑥ 商品タブ所属：他のデバイスでの変更をリアルタイム反映
+    productTabsRef.on('value', (snapshot) => {
+      const data = snapshot.val() || {};
+      lastProductTabsData = data;
+      applyProductTabsData(data);
+      try { localStorage.setItem('order-mgmt-product-tabs', JSON.stringify(data)); } catch(e) {}
+      renderList(); renderTabs();
     });
 
   } catch (e) {
