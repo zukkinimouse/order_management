@@ -234,32 +234,95 @@
     margin-top: 1px;
   }
 
-  /* 数値入力 */
-  .num-input {
+  /* 数値セル（タップで選択ポップアップを開く） */
+  .num-cell {
     width: 100%;
     border: 1.5px solid var(--border);
     border-radius: 6px;
-    padding: 5px 4px;
-    font-size: 13px;
+    padding: 7px 4px;
+    font-size: 15px;
     font-weight: 600;
     text-align: center;
     background: var(--bg);
     color: var(--text);
-    -moz-appearance: textfield;
-    font-family: inherit;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
   }
-  .num-input::-webkit-outer-spin-button,
-  .num-input::-webkit-inner-spin-button { -webkit-appearance: none; }
-  .num-input:focus {
-    outline: none;
-    border-color: var(--accent);
-    background: white;
-  }
-  .item.hidden-item .num-input {
+  .item.hidden-item .num-cell {
     background: transparent;
     border-color: transparent;
     color: var(--hidden-text);
     pointer-events: none;
+  }
+
+  /* 数値選択ポップアップ */
+  .num-popup-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 400;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .num-popup-overlay.open { display: flex; }
+  .num-popup {
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    padding: 16px 16px 36px;
+    width: 100%;
+    max-width: 480px;
+  }
+  .num-popup-bar {
+    width: 40px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 0 auto 12px;
+  }
+  .num-popup-title {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-sub);
+    margin-bottom: 14px;
+  }
+  .num-popup-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .num-popup-btn {
+    aspect-ratio: 1;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--text);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .num-popup-btn.selected {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .num-popup-cancel {
+    width: 100%;
+    padding: 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text-sub);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
   }
 
   /* チェックボックス */
@@ -562,6 +625,16 @@
   </div>
 </div>
 
+<!-- 数値選択ポップアップ（最低在庫・発注数） -->
+<div class="num-popup-overlay" id="num-popup-overlay" onclick="closeNumPopup()">
+  <div class="num-popup" onclick="event.stopPropagation()">
+    <div class="num-popup-bar"></div>
+    <div class="num-popup-title" id="num-popup-title"></div>
+    <div class="num-popup-grid" id="num-popup-grid"></div>
+    <button class="num-popup-cancel" onclick="closeNumPopup()">キャンセル</button>
+  </div>
+</div>
+
 <script>
 // ========== 商品データ ==========
 const TABS = ["雑貨", "消耗品"];
@@ -792,14 +865,15 @@ function saveOrderHistory() {
 
 /**
  * 発注履歴に基づいて色分けクラスを返す
- *   青: 1週間以内に発注
- *   黄: 1週間〜1ヶ月前に発注
- *   赤: 1ヶ月以上発注なし（履歴なし含む）
+ *   なし: 発注履歴がない（デフォルト色を維持）
+ *   青:   1週間以内に発注
+ *   黄:   1週間〜1ヶ月前に発注
+ *   赤:   1ヶ月以上発注なし
  */
 function getHistoryClass(id) {
   const ts = orderHistory[id];
-  if (!ts) return 'hist-red';
-  const age  = Date.now() - ts;
+  if (!ts) return '';  // 履歴なし → デフォルト色を維持
+  const age   = Date.now() - ts;
   const WEEK  = 7  * 24 * 3600 * 1000;
   const MONTH = 30 * 24 * 3600 * 1000;
   if (age <= WEEK)  return 'hist-blue';
@@ -907,10 +981,8 @@ function renderList() {
         <span class="short-name">${p.shortName}</span>
         <span class="hint">タップで詳細</span>
       </div>
-      <input type="number" class="num-input" value="${p.minStock}" min="0"
-             onchange="updateMin(${p.id}, this.value)" ${p.visible ? '' : 'disabled'}>
-      <input type="number" class="num-input" value="${p.orderQty}" min="1"
-             onchange="updateOrder(${p.id}, this.value)" ${p.visible ? '' : 'disabled'}>
+      <div class="num-cell" ${p.visible ? `onclick="openNumPopup(${p.id}, 'min')"` : ''}>${p.minStock}</div>
+      <div class="num-cell" ${p.visible ? `onclick="openNumPopup(${p.id}, 'order')"` : ''}>${p.orderQty}</div>
       <div class="check-cell">
         <div class="check-box ${p.checked && p.visible ? 'checked' : ''}" onclick="toggleCheck(${p.id})">
           ${p.checked && p.visible ? '✓' : ''}
@@ -938,8 +1010,56 @@ function toggleCheck(id) {
   renderList(); renderTabs();
 }
 
-function updateMin(id, val) { const p = findProduct(id); if (p) p.minStock = parseInt(val) || 0; }
-function updateOrder(id, val) { const p = findProduct(id); if (p) p.orderQty = parseInt(val) || 1; }
+// ========== 数値選択ポップアップ ==========
+let numPopupTarget = null; // { id, field: 'min' | 'order' }
+
+/**
+ * 数値選択ポップアップを開く
+ * 最低在庫: 0〜15, 発注数: 1〜15
+ */
+function openNumPopup(id, field) {
+  const p = findProduct(id);
+  if (!p) return;
+  numPopupTarget = { id, field };
+
+  const isMin   = field === 'min';
+  const current = isMin ? p.minStock : p.orderQty;
+  const min     = isMin ? 0 : 1;
+  const max     = 15;
+
+  document.getElementById('num-popup-title').textContent =
+    isMin ? '最低在庫数を選択' : '発注数を選択';
+
+  const grid = document.getElementById('num-popup-grid');
+  grid.innerHTML = '';
+  for (let i = min; i <= max; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'num-popup-btn' + (i === current ? ' selected' : '');
+    btn.textContent = i;
+    btn.onclick = () => selectNum(i);
+    grid.appendChild(btn);
+  }
+
+  document.getElementById('num-popup-overlay').classList.add('open');
+}
+
+function closeNumPopup() {
+  document.getElementById('num-popup-overlay').classList.remove('open');
+  numPopupTarget = null;
+}
+
+function selectNum(val) {
+  if (!numPopupTarget) return;
+  const p = findProduct(numPopupTarget.id);
+  if (!p) return;
+  if (numPopupTarget.field === 'min') {
+    p.minStock = val;
+  } else {
+    p.orderQty = val;
+  }
+  closeNumPopup();
+  renderList();
+}
 
 function findProduct(id) {
   return Object.values(allProducts).flat().find(p => p.id === id);
