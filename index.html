@@ -523,6 +523,36 @@
   .item.hist-yellow { border-left: 4px solid #f59e0b; }
   .item.hist-red    { border-left: 4px solid #ef4444; }
 
+  /* 絞り込みフィルターバー */
+  .filter-bar {
+    display: flex;
+    gap: 6px;
+    padding: 8px 0 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .filter-bar::-webkit-scrollbar { display: none; }
+  .filter-btn {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-sub);
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: all 0.15s;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .filter-btn.active          { background: var(--text);  border-color: var(--text);  color: white; }
+  .filter-btn.f-blue.active   { background: #3b82f6; border-color: #3b82f6; color: white; }
+  .filter-btn.f-yellow.active { background: #f59e0b; border-color: #f59e0b; color: white; }
+  .filter-btn.f-red.active    { background: #ef4444; border-color: #ef4444; color: white; }
+
 </style>
 </head>
 <body>
@@ -536,6 +566,7 @@
     </div>
   </div>
   <div class="tabs" id="tabs"></div>
+  <div class="filter-bar" id="filter-bar"></div>
 </div>
 
 <div class="col-header">
@@ -851,9 +882,10 @@ function getHistoryClass(id) {
 }
 
 // ========== 状態 ==========
-let currentTab = "雑貨";
-let dragSrcIndex = null;
+let currentTab    = "雑貨";
+let dragSrcIndex  = null;
 let modalTargetId = null;
+let currentFilter = 'all'; // 'all' | 'blue' | 'yellow' | 'red' | 'none'
 
 function getProducts() { return allProducts[currentTab]; }
 
@@ -924,25 +956,71 @@ function switchTab(tab) {
   currentTab = tab;
   dragSrcIndex = null;
   renderTabs();
+  renderFilterBar();
+  renderList();
+}
+
+// ========== フィルターバー ==========
+function renderFilterBar() {
+  const visibles = getProducts().filter(p => p.visible);
+  const counts = {
+    all:    getProducts().length,
+    blue:   visibles.filter(p => getHistoryClass(p.id) === 'hist-blue').length,
+    yellow: visibles.filter(p => getHistoryClass(p.id) === 'hist-yellow').length,
+    red:    visibles.filter(p => getHistoryClass(p.id) === 'hist-red').length,
+    none:   visibles.filter(p => getHistoryClass(p.id) === '').length,
+  };
+  const filters = [
+    { id: 'all',    label: 'すべて',  cls: '' },
+    { id: 'blue',   label: '🔵 今週',  cls: 'f-blue' },
+    { id: 'yellow', label: '🟡 今月',  cls: 'f-yellow' },
+    { id: 'red',    label: '🔴 古い',  cls: 'f-red' },
+    { id: 'none',   label: '⚪ 未記録', cls: '' },
+  ];
+  document.getElementById('filter-bar').innerHTML = filters.map(f => `
+    <button class="filter-btn ${f.cls} ${currentFilter === f.id ? 'active' : ''}"
+            onclick="setFilter('${f.id}')">
+      ${f.label}&nbsp;<span style="opacity:0.65;font-weight:400">${counts[f.id]}</span>
+    </button>
+  `).join('');
+}
+
+function setFilter(filter) {
+  currentFilter = filter;
+  renderFilterBar();
   renderList();
 }
 
 // ========== リスト描画 ==========
 function renderList() {
   const list = document.getElementById('list');
-  const products = getProducts();
-  if (products.length === 0) { list.innerHTML = '<div class="empty-state">商品がありません</div>'; return; }
+  const allProds = getProducts();
+  const isFiltered = currentFilter !== 'all';
+
+  // フィルター適用：絞り込み中は表示中かつ色が一致するものだけ表示
+  const products = isFiltered
+    ? allProds.filter(p => {
+        if (!p.visible) return false;
+        if (currentFilter === 'none') return getHistoryClass(p.id) === '';
+        return getHistoryClass(p.id) === `hist-${currentFilter}`;
+      })
+    : allProds;
+
+  if (products.length === 0) {
+    list.innerHTML = '<div class="empty-state">該当する商品がありません</div>';
+    updateBar(); return;
+  }
 
   list.innerHTML = products.map(p => `
     <div class="item ${p.visible ? '' : 'hidden-item'} ${p.checked && p.visible ? 'checked' : ''} ${p.visible ? getHistoryClass(p.id) : ''}"
-         id="item-${p.id}" draggable="true"
+         id="item-${p.id}" ${isFiltered ? '' : 'draggable="true"'}
          oncontextmenu="return false"
-         ondragstart="dragStart(event, ${p.id})"
-         ondragover="dragOver(event, ${p.id})"
-         ondrop="drop(event, ${p.id})"
-         ondragend="dragEnd(event)">
+         ${isFiltered ? '' : `ondragstart="dragStart(event, ${p.id})" ondragover="dragOver(event, ${p.id})" ondrop="drop(event, ${p.id})" ondragend="dragEnd(event)"`}>
       <div class="ops">
-        <span class="handle" ontouchstart="touchDragStart(event, ${p.id})">⠿</span>
+        ${isFiltered
+          ? '<span class="handle" style="opacity:0.2;pointer-events:none">⠿</span>'
+          : `<span class="handle" ontouchstart="touchDragStart(event, ${p.id})">⠿</span>`
+        }
         <button class="toggle-vis ${p.visible ? 'vis-on' : ''}" onclick="toggleVisible(${p.id})">
           ${p.visible ? '👁' : '🙈'}
         </button>
@@ -1252,12 +1330,13 @@ function applyOrderFromIdString(products, idStr) {
       renderList(); renderTabs();
     });
 
-    // ② 発注履歴：色分けをリアルタイム反映
+    // ② 発注履歴：色分けをリアルタイム反映（フィルターカウントも更新）
     historyRef.on('value', (snapshot) => {
       const data = snapshot.val() || {};
       Object.keys(data).forEach(id => {
         orderHistory[parseInt(id)] = data[id];
       });
+      renderFilterBar();
       renderList();
     });
 
@@ -1284,6 +1363,7 @@ checkScheduledReset();
 updateResetTimer();
 
 renderTabs();
+renderFilterBar();
 renderList();
 
 // ========== Service Worker 登録（PWA対応） ==========
