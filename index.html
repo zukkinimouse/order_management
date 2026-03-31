@@ -158,6 +158,10 @@
     transition: all 0.2s;
     cursor: default;
     box-shadow: var(--shadow);
+    /* iOS/Android 長押しメニューを防止 */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .item.hidden-item {
     background: var(--hidden-bg);
@@ -448,6 +452,11 @@
     padding: 40px 0;
   }
 
+  /* 発注履歴による左ボーダー色分け */
+  .item.hist-blue   { border-left: 4px solid #3b82f6; }
+  .item.hist-yellow { border-left: 4px solid #f59e0b; }
+  .item.hist-red    { border-left: 4px solid #ef4444; }
+
   /* 並び順共有ボタン */
   .share-btn {
     background: none;
@@ -548,7 +557,7 @@
     <div class="order-modal-list" id="order-modal-list"></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeOrderModalDirect()">閉じる</button>
-      <button class="btn btn-primary" onclick="completeOrder()">発注完了 ✓</button>
+      <button class="btn btn-primary" onclick="completeOrder()">完了 ✓</button>
     </div>
   </div>
 </div>
@@ -769,6 +778,35 @@ const zakkaProducts    = makeProducts(RAW_ZAKKA,    "雑貨",   0);
 const shomohinProducts = makeProducts(RAW_SHOMOHIN, "消耗品", 10000);
 const allProducts = { "雑貨": zakkaProducts, "消耗品": shomohinProducts };
 
+// ========== 発注履歴（色分け用） ==========
+// { productId: 最終発注タイムスタンプ }
+let orderHistory = {};
+try {
+  const saved = localStorage.getItem('order-mgmt-history');
+  if (saved) orderHistory = JSON.parse(saved);
+} catch (e) {}
+
+function saveOrderHistory() {
+  try { localStorage.setItem('order-mgmt-history', JSON.stringify(orderHistory)); } catch (e) {}
+}
+
+/**
+ * 発注履歴に基づいて色分けクラスを返す
+ *   青: 1週間以内に発注
+ *   黄: 1週間〜1ヶ月前に発注
+ *   赤: 1ヶ月以上発注なし（履歴なし含む）
+ */
+function getHistoryClass(id) {
+  const ts = orderHistory[id];
+  if (!ts) return 'hist-red';
+  const age  = Date.now() - ts;
+  const WEEK  = 7  * 24 * 3600 * 1000;
+  const MONTH = 30 * 24 * 3600 * 1000;
+  if (age <= WEEK)  return 'hist-blue';
+  if (age <= MONTH) return 'hist-yellow';
+  return 'hist-red';
+}
+
 // ========== 状態 ==========
 let currentTab = "雑貨";
 let dragSrcIndex = null;
@@ -776,32 +814,57 @@ let modalTargetId = null;
 
 function getProducts() { return allProducts[currentTab]; }
 
-// ========== 自動リセット ==========
-const RESET_MS = 5 * 60 * 60 * 1000;
-let lastCheckedAt = null;
+// ========== スケジュールリセット（月・水・金 朝6時） ==========
+const RESET_DAYS = [1, 3, 5]; // 月=1, 水=3, 金=5
+const RESET_HOUR = 6;
+const DAY_NAMES  = ['日', '月', '火', '水', '木', '金', '土'];
 
+/** 次回のリセット予定時刻（Dateオブジェクト）を返す */
+function getNextResetTime(from = new Date()) {
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(from);
+    d.setDate(d.getDate() + i);
+    d.setHours(RESET_HOUR, 0, 0, 0);
+    if (RESET_DAYS.includes(d.getDay())) return d;
+  }
+}
+
+/** 前回アクセス以降にリセット時刻を過ぎていたら自動でリセット */
+function checkScheduledReset() {
+  const lastReset = parseInt(localStorage.getItem('order-mgmt-last-reset') || '0');
+  const now = Date.now();
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    d.setHours(RESET_HOUR, 0, 0, 0);
+    if (RESET_DAYS.includes(d.getDay()) && d.getTime() <= now && d.getTime() > lastReset) {
+      doReset(false);
+      localStorage.setItem('order-mgmt-last-reset', String(d.getTime()));
+      break;
+    }
+  }
+}
+
+/** チェックをリセットして画面を更新する */
+function doReset(showAlert = true) {
+  Object.values(allProducts).flat().forEach(p => { p.checked = false; });
+  renderList(); renderTabs();
+  if (showAlert) alert('✅ 発注完了！');
+}
+
+/** ヘッダーに次回リセット時刻を表示する */
 function updateResetTimer() {
   const timerEl = document.getElementById('reset-timer');
-  const anyChecked = Object.values(allProducts).flat().some(p => p.checked && p.visible);
-  if (!anyChecked || !lastCheckedAt) { timerEl.style.display = 'none'; return; }
-  const remaining = RESET_MS - (Date.now() - lastCheckedAt);
-  if (remaining <= 0) { doAutoReset(); return; }
+  const next = getNextResetTime();
+  if (!next) { timerEl.style.display = 'none'; return; }
   timerEl.style.display = '';
-  const h = Math.floor(remaining / 3600000);
-  const m = Math.floor((remaining % 3600000) / 60000);
-  const s = Math.floor((remaining % 60000) / 1000);
-  timerEl.textContent = h > 0 ? `🔄 ${h}時間${m}分後にリセット` : m > 0 ? `🔄 ${m}分${s}秒後にリセット` : `🔄 ${s}秒後にリセット`;
-  timerEl.classList.toggle('soon', remaining < 3600000);
+  const remaining = next - Date.now();
+  timerEl.textContent = `🔄 次回リセット: ${DAY_NAMES[next.getDay()]}曜 ${RESET_HOUR}:00`;
+  timerEl.classList.toggle('soon', remaining < 3 * 3600000); // 3時間以内で赤表示
 }
 
-function doAutoReset() {
-  Object.values(allProducts).flat().forEach(p => { p.checked = false; });
-  lastCheckedAt = null;
-  renderList(); renderTabs();
-  document.getElementById('reset-timer').style.display = 'none';
-}
-
-setInterval(() => { if (lastCheckedAt) updateResetTimer(); }, 1000);
+// 1分ごとにスケジュールリセットを確認
+setInterval(() => { checkScheduledReset(); updateResetTimer(); }, 60000);
 
 // ========== タブ ==========
 function renderTabs() {
@@ -827,14 +890,15 @@ function renderList() {
   if (products.length === 0) { list.innerHTML = '<div class="empty-state">商品がありません</div>'; return; }
 
   list.innerHTML = products.map(p => `
-    <div class="item ${p.visible ? '' : 'hidden-item'} ${p.checked && p.visible ? 'checked' : ''}"
+    <div class="item ${p.visible ? '' : 'hidden-item'} ${p.checked && p.visible ? 'checked' : ''} ${p.visible ? getHistoryClass(p.id) : ''}"
          id="item-${p.id}" draggable="true"
+         oncontextmenu="return false"
          ondragstart="dragStart(event, ${p.id})"
          ondragover="dragOver(event, ${p.id})"
          ondrop="drop(event, ${p.id})"
          ondragend="dragEnd(event)">
       <div class="ops">
-        <span class="handle">⠿</span>
+        <span class="handle" ontouchstart="touchDragStart(event, ${p.id})">⠿</span>
         <button class="toggle-vis ${p.visible ? 'vis-on' : ''}" onclick="toggleVisible(${p.id})">
           ${p.visible ? '👁' : '🙈'}
         </button>
@@ -871,9 +935,7 @@ function toggleCheck(id) {
   const p = findProduct(id);
   if (!p || !p.visible) return;
   p.checked = !p.checked;
-  const anyChecked = Object.values(allProducts).flat().some(x => x.checked && x.visible);
-  lastCheckedAt = anyChecked ? Date.now() : null;
-  renderList(); renderTabs(); updateResetTimer();
+  renderList(); renderTabs();
 }
 
 function updateMin(id, val) { const p = findProduct(id); if (p) p.minStock = parseInt(val) || 0; }
@@ -921,6 +983,56 @@ function dragEnd(e) {
   dragSrcIndex = null;
 }
 
+// ========== タッチドラッグ（iOS/Android対応） ==========
+let touchDrag = { active: false, srcIndex: null, srcId: null };
+
+/** ハンドルの touchstart：ドラッグ開始（長押しメニューを preventDefault で防止） */
+function touchDragStart(e, id) {
+  e.preventDefault();
+  const products = getProducts();
+  touchDrag = {
+    active: true,
+    srcIndex: products.findIndex(p => p.id === id),
+    srcId: id
+  };
+  const el = document.getElementById('item-' + id);
+  if (el) el.classList.add('dragging');
+}
+
+// document レベルの touchmove：スクロールを防ぎつつドラッグ先をハイライト
+document.addEventListener('touchmove', function(e) {
+  if (!touchDrag.active) return;
+  e.preventDefault();
+  const touch = e.touches[0];
+  document.querySelectorAll('.item').forEach(el => el.classList.remove('drag-over'));
+  const target = document.elementFromPoint(touch.clientX, touch.clientY);
+  const item = target && target.closest('.item[id^="item-"]');
+  if (item && item.id !== 'item-' + touchDrag.srcId) item.classList.add('drag-over');
+}, { passive: false });
+
+// document レベルの touchend：ドラッグ完了して並び替え実行
+document.addEventListener('touchend', function(e) {
+  if (!touchDrag.active) return;
+  const touch = e.changedTouches[0];
+  const target = document.elementFromPoint(touch.clientX, touch.clientY);
+  const item = target && target.closest('.item[id^="item-"]');
+
+  if (item) {
+    const targetId = parseInt(item.id.replace('item-', ''));
+    const products = getProducts();
+    const targetIndex = products.findIndex(p => p.id === targetId);
+    if (touchDrag.srcIndex !== null && touchDrag.srcIndex !== targetIndex) {
+      const moved = products.splice(touchDrag.srcIndex, 1)[0];
+      products.splice(targetIndex, 0, moved);
+      saveOrderToStorage();
+    }
+  }
+
+  document.querySelectorAll('.item').forEach(el => el.classList.remove('drag-over', 'dragging'));
+  touchDrag = { active: false, srcIndex: null, srcId: null };
+  renderList();
+});
+
 // ========== モーダル ==========
 function openModal(id) {
   modalTargetId = id;
@@ -956,9 +1068,16 @@ function openOrderModal() {
 function closeOrderModal(e) { if (e.target === document.getElementById('order-modal')) closeOrderModalDirect(); }
 function closeOrderModalDirect() { document.getElementById('order-modal').classList.remove('open'); }
 function completeOrder() {
-  Object.values(allProducts).flat().forEach(p => { p.checked = false; });
-  lastCheckedAt = null;
-  closeOrderModalDirect(); renderList(); renderTabs(); updateResetTimer();
+  const now = Date.now();
+  // チェック済み商品の最終発注時刻を記録してからリセット
+  Object.values(allProducts).flat().forEach(p => {
+    if (p.checked && p.visible) orderHistory[p.id] = now;
+    p.checked = false;
+  });
+  saveOrderHistory();
+  localStorage.setItem('order-mgmt-last-reset', String(now));
+  closeOrderModalDirect();
+  renderList(); renderTabs();
   alert('✅ 発注完了！');
 }
 
@@ -1060,12 +1179,16 @@ function copyShareURL() {
 const sharedFromURL = applyOrderFromHash(location.hash);
 if (sharedFromURL) {
   document.getElementById('shared-banner').classList.add('visible');
-  // 共有URLの並び順をlocalStorageにも保存し、次回以降も維持
   saveOrderToStorage();
 } else {
-  // URLハッシュがない場合は前回保存した並び順を復元
   loadOrderFromStorage();
 }
+
+// 2. 前回アクセス以降にリセット時刻を過ぎていたら自動リセット
+checkScheduledReset();
+
+// 3. 次回リセット時刻をヘッダーに表示
+updateResetTimer();
 
 renderTabs();
 renderList();
