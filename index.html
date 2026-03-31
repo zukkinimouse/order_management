@@ -1055,6 +1055,10 @@ try {
   if (saved) applyProductTabsData(JSON.parse(saved));
 } catch(e) {}
 
+// 商品の個別設定（表示/非表示・最低在庫・発注数・省略名）をlocalStorageから復元
+// （loadProductSettingsはfunction宣言のためホイストされており、後方定義でも問題なし）
+loadProductSettings();
+
 // ========== 発注履歴（色分け用） ==========
 // { productId: 最終発注タイムスタンプ }
 let orderHistory = {};
@@ -1402,6 +1406,69 @@ function saveProductTabs() {
   if (productTabsRef) productTabsRef.set(Object.keys(data).length > 0 ? data : null);
 }
 
+// ========== 商品設定の永続化（表示/非表示・最低在庫・発注数・省略名） ==========
+
+/** localStorageから商品設定を読み込んで適用する */
+function loadProductSettings() {
+  try {
+    const saved = localStorage.getItem('order-mgmt-product-settings');
+    if (saved) applyProductSettings(JSON.parse(saved));
+  } catch(e) {}
+}
+
+/**
+ * 商品設定データを各商品オブジェクトに適用する
+ * data: { "productId": { v: visible, m: minStock, o: orderQty, s: shortName }, ... }
+ */
+function applyProductSettings(data) {
+  Object.keys(data).forEach(idStr => {
+    const id = parseInt(idStr);
+    // findProductは後方定義だがhoistされるため問題なし
+    const p = getAllProductsUnique().find(p => p.id === id)
+           || Object.values(allProducts).flat().find(p => p.id === id);
+    if (!p) return;
+    const s = data[idStr];
+    if (s.v !== undefined) p.visible  = s.v;
+    if (s.m !== undefined) p.minStock = s.m;
+    if (s.o !== undefined) p.orderQty = s.o;
+    if (s.s !== undefined) p.shortName = s.s;
+  });
+}
+
+/** 全商品設定をlocalStorageに保存する（デフォルト値と変わらないものは省略） */
+function saveProductSettingsLocal() {
+  try {
+    const data = {};
+    getAllProductsUnique().forEach(p => {
+      const entry = {};
+      if (!p.visible)                              entry.v = false;
+      if (p.minStock !== 1)                        entry.m = p.minStock;
+      if (p.orderQty !== 1)                        entry.o = p.orderQty;
+      if (p.shortName !== autoShorten(p.fullName)) entry.s = p.shortName;
+      if (Object.keys(entry).length > 0) data[String(p.id)] = entry;
+    });
+    localStorage.setItem('order-mgmt-product-settings', JSON.stringify(data));
+  } catch(e) {}
+}
+
+/** 指定した商品1件の設定をFirebaseに保存する */
+function saveProductSettingToFirebase(id) {
+  if (!productSettingsRef) return;
+  const p = getAllProductsUnique().find(p => p.id === id);
+  if (!p) return;
+  const entry = {};
+  if (!p.visible)                              entry.v = false;
+  if (p.minStock !== 1)                        entry.m = p.minStock;
+  if (p.orderQty !== 1)                        entry.o = p.orderQty;
+  if (p.shortName !== autoShorten(p.fullName)) entry.s = p.shortName;
+  // デフォルトに戻った場合はFirebaseからも削除する
+  if (Object.keys(entry).length > 0) {
+    productSettingsRef.child(String(id)).set(entry);
+  } else {
+    productSettingsRef.child(String(id)).remove();
+  }
+}
+
 // ========== フィルターバー ==========
 function renderFilterBar() {
   const visibles = getProducts().filter(p => p.visible);
@@ -1490,6 +1557,9 @@ function toggleVisible(id) {
   if (!p) return;
   p.visible = !p.visible;
   if (!p.visible) p.checked = false;
+  // 表示/非表示の変更を永続化する
+  saveProductSettingsLocal();
+  saveProductSettingToFirebase(id);
   renderList(); renderTabs();
 }
 
@@ -1558,6 +1628,9 @@ function selectNum(val) {
   } else {
     p.orderQty = val;
   }
+  // 在庫数・発注数の変更を永続化する
+  saveProductSettingsLocal();
+  saveProductSettingToFirebase(numPopupTarget.id);
   closeNumPopup();
   renderList();
 }
@@ -1731,6 +1804,10 @@ function saveModal() {
   p.minStock  = parseInt(document.getElementById('modal-min').value)   || 0;
   p.orderQty  = parseInt(document.getElementById('modal-order').value) || 1;
 
+  // 省略名・在庫数・発注数の変更を永続化する
+  saveProductSettingsLocal();
+  saveProductSettingToFirebase(modalTargetId);
+
   // 色の手動上書きを保存（null = 自動に戻す）
   if (modalColorSelection === null) {
     delete colorOverride[modalTargetId];
@@ -1824,8 +1901,9 @@ let checksRef        = null; // チェック状態
 let historyRef       = null; // 発注履歴（色分け）
 let orderRef         = null; // 並び順
 let colorOverrideRef = null; // 色の手動上書き
-let customTabsRef    = null; // カスタムタブ一覧
-let productTabsRef   = null; // 商品のタブ所属
+let customTabsRef      = null; // カスタムタブ一覧
+let productTabsRef     = null; // 商品のタブ所属
+let productSettingsRef = null; // 商品設定（表示/非表示・在庫数・発注数・省略名）
 
 let colorOverride = {};
 
@@ -1869,12 +1947,13 @@ function applyOrderFromIdString(products, idStr) {
   try {
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
-    checksRef        = db.ref('checks');
-    historyRef       = db.ref('orderHistory');
-    orderRef         = db.ref('order');
-    colorOverrideRef = db.ref('colorOverride');
-    customTabsRef    = db.ref('customTabs');
-    productTabsRef   = db.ref('productTabs');
+    checksRef          = db.ref('checks');
+    historyRef         = db.ref('orderHistory');
+    orderRef           = db.ref('order');
+    colorOverrideRef   = db.ref('colorOverride');
+    customTabsRef      = db.ref('customTabs');
+    productTabsRef     = db.ref('productTabs');
+    productSettingsRef = db.ref('productSettings');
 
     // ① チェック状態：全員にリアルタイム反映
     checksRef.on('value', (snapshot) => {
@@ -1966,6 +2045,16 @@ function applyOrderFromIdString(products, idStr) {
       applyProductTabsData(data);
       try { localStorage.setItem('order-mgmt-product-tabs', JSON.stringify(data)); } catch(e) {}
       renderList(); renderTabs();
+    });
+
+    // ⑦ 商品設定（表示/非表示・在庫数・発注数・省略名）：他のデバイスでの変更をリアルタイム反映
+    productSettingsRef.on('value', (snapshot) => {
+      const data = snapshot.val() || {};
+      applyProductSettings(data);
+      try { localStorage.setItem('order-mgmt-product-settings', JSON.stringify(data)); } catch(e) {}
+      renderFilterBar();
+      renderList();
+      renderTabs();
     });
 
   } catch (e) {
