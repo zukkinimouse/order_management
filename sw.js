@@ -1,5 +1,5 @@
 // キャッシュ名（バージョンを変えると古いキャッシュを破棄する）
-const CACHE_NAME = 'order-management-v10';
+const CACHE_NAME = 'order-management-v11';
 
 // オフラインでも使えるようにキャッシュするファイル
 const ASSETS_TO_CACHE = [

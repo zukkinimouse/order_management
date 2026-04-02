@@ -1009,9 +1009,10 @@ function escapeAttr(s) {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
-// HTML表示用エスケープ
+// HTML表示用エスケープ（innerHTML 埋め込み前に使う）
 function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function makeProducts(rawList, tab, startId) {
@@ -1535,7 +1536,7 @@ function renderList() {
         </button>
       </div>
       <div class="item-name ${p.visible ? '' : 'hidden-text'}" onclick="openModal(${p.id})">
-        <span class="short-name">${p.shortName}</span>
+        <span class="short-name">${escapeHtml(p.shortName)}</span>
         <span class="hint">タップで詳細</span>
       </div>
       <div class="num-cell" ${p.visible ? `onclick="openNumPopup(${p.id}, 'min')"` : ''}>${p.minStock}</div>
@@ -1858,7 +1859,7 @@ function openOrderModal() {
   const checked = getAllProductsUnique().filter(p => p.checked && p.visible);
   document.getElementById('order-modal-list').innerHTML = checked.map(p => `
     <div class="order-item-row">
-      <span>${p.shortName}</span>
+      <span>${escapeHtml(p.shortName)}</span>
       <span>${p.orderQty}個</span>
     </div>
   `).join('');
